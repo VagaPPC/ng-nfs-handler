@@ -1,0 +1,46 @@
+; M0b - test NFSDismount e autochiusura handler orfano
+FailAt 21
+Set O NGNFS:build/m0b-out.txt
+Set D NGNFS:build/os3/NFSDismount
+Delete NGNFS:build/pktlog.log $O RAM:pktlog.log QUIET >NIL:
+Version $D >$O
+
+Echo "== A: NFSDismount con lock aperto (deve rifiutare)" >>$O
+Mount NGNFS:tools/pktlog-handler/test/PKT0 >>$O
+Wait 2
+CD PKTLOG:
+Run >NIL: Wait 20
+CD SYS:
+$D PKT0: >>$O
+Echo "rc=$RC" >>$O
+
+Echo "== B: NFSDismount senza lock (deve smontare e scaricare)" >>$O
+Wait 25
+$D PKT0: >>$O
+Echo "rc=$RC" >>$O
+Assign DEVICES >>$O
+Assign VOLS >>$O
+
+Echo "== C: rimount dopo UnLoadSeg e nuovo dismount" >>$O
+Mount NGNFS:tools/pktlog-handler/test/PKT0 >>$O
+Wait 2
+Assign >NIL: PKTLOG: EXISTS
+If NOT WARN
+  Dir PKTLOG: >>$O
+EndIf
+$D PKT0: >>$O
+Echo "rc=$RC" >>$O
+
+Echo "== D: Assign DISMOUNT -> orfano -> autochiusura" >>$O
+Mount NGNFS:tools/pktlog-handler/test/PKT1 >>$O
+Wait 2
+Assign PKT1: DISMOUNT >>$O
+Wait 25
+Assign VOLS >>$O
+
+Echo "== E: device inesistente" >>$O
+$D NONESISTE: >>$O
+Echo "rc=$RC" >>$O
+
+Copy RAM:pktlog.log NGNFS:build/pktlog-ram.log QUIET
+Echo "== FINE" >>$O

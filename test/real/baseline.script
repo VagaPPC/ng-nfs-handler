@@ -1,0 +1,14 @@
+; Riferimento: lettura 5 MB tramite il filesystem di rete che porta a NGNFS:
+FailAt 21
+Set O NGNFS:build/real-baseline-out.txt
+Delete RAM:big5-ref.bin QUIET >NIL:
+Echo "== lettura 5 MB via NGNFS: (filesystem di rete esistente)" >$O
+Date >>$O
+Copy NGNFS:build/big5-ref.bin RAM:
+Date >>$O
+Echo "== scrittura 5 MB via NGNFS:" >>$O
+Date >>$O
+Copy RAM:big5-ref.bin NGNFS:build/big5-up.bin
+Date >>$O
+Delete RAM:big5-ref.bin QUIET >NIL:
+Echo "== FINE" >>$O

@@ -1,0 +1,7 @@
+/* Test in emulazione: handler e log su SERVER: (cartella Linux condivisa) */
+Handler   = NGNFS:build/os3/pktlog-handler
+StackSize = 8192
+Priority  = 5
+GlobVec   = -1
+Activate  = 1
+Startup   = "VOLUME=PKTLOG LOG=NGNFS:build/pktlog.log"

@@ -1,0 +1,38 @@
+; Misura prestazioni nfs-handler (senza LOG)
+FailAt 21
+Set O NGNFS:build/perf-out.txt
+Delete RAM:perf ALL QUIET >NIL:
+MakeDir RAM:perf
+Mount NGNFS:test/perf/NFS0 >$O
+List NAS:perf >NIL:
+Echo "== lettura 1 MB" >>$O
+Date >>$O
+Copy NAS:perf/big1.bin RAM:perf/
+Date >>$O
+Echo "== lettura 5 MB" >>$O
+Date >>$O
+Copy NAS:perf/big5.bin RAM:perf/
+Date >>$O
+Echo "== scrittura 5 MB" >>$O
+Date >>$O
+Copy RAM:perf/big5.bin NAS:perf/up5.bin
+Date >>$O
+Echo "== lettura 100 file da 4 KB" >>$O
+Date >>$O
+Copy NAS:perf/small RAM:perf/small ALL QUIET
+Date >>$O
+Echo "== scrittura 100 file da 4 KB" >>$O
+Date >>$O
+Copy RAM:perf/small NAS:perf/up_small ALL QUIET
+Date >>$O
+Echo "== List di 100 file" >>$O
+Date >>$O
+List NAS:perf/up_small >NIL:
+Date >>$O
+Echo "== Delete 100 file" >>$O
+Date >>$O
+Delete NAS:perf/up_small ALL QUIET
+Date >>$O
+NGNFS:build/os3/NFSDismount NFS0: >>$O
+Delete RAM:perf ALL QUIET >NIL:
+Echo "== FINE" >>$O

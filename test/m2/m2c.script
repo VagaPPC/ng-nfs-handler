@@ -1,0 +1,23 @@
+; M2b - nomi case-insensitive
+FailAt 21
+Set O NGNFS:build/m2c-out.txt
+Delete NGNFS:build/nfs-handler.log $O QUIET >NIL:
+Mount NGNFS:test/m2/NFS0 >$O
+Wait 1
+Echo "== Type readme.txt (reale: Readme.txt)" >>$O
+Type NAS:readme.txt >>$O
+Echo "== Type README.TXT" >>$O
+Type NAS:README.TXT >>$O
+Echo "== Type maiuscolo.txt (reale: MAIUSCOLO.TXT)" >>$O
+Type NAS:maiuscolo.txt >>$O
+Echo "== List DIR1/SUB (reale: dir1/sub)" >>$O
+List NAS:DIR1/SUB >>$O
+Echo "== List DIR1/SUB/FILE.BIN" >>$O
+List NAS:DIR1/SUB/FILE.BIN >>$O
+Echo "== Type latin1 in maiuscolo/minuscolo invertito" >>$O
+Type "NAS:àCCENTATO É.TXT" >>$O
+Echo "== Type inesistente" >>$O
+Type NAS:nonesiste >>$O
+Echo "== Dismount" >>$O
+NGNFS:build/os3/NFSDismount NFS0: >>$O
+Echo "== FINE" >>$O

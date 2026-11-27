@@ -1,0 +1,8 @@
+# Documenti di progettazione locali
+DESIGN.md
+
+# Build
+build/
+*.o
+*.a
+*.map

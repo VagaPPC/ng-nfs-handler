@@ -1,0 +1,23 @@
+; Diagnosi prestazioni con LOG (RPC e tempi per pacchetto)
+FailAt 21
+Set O NGNFS:build/perflog-out.txt
+Delete NGNFS:build/nfs-handler.log $O QUIET >NIL:
+Delete RAM:pl ALL QUIET >NIL:
+MakeDir RAM:pl
+Mount NGNFS:test/m2/NFS0 >$O
+List NAS:perf >NIL:
+Echo "== MARK lettura 1 MB" >>$O
+Copy NAS:perf/big1.bin RAM:pl/
+Echo "== MARK lettura 1 file 4 KB" >>$O
+Copy NAS:perf/small/f000.bin RAM:pl/
+Echo "== MARK scrittura 1 file 4 KB" >>$O
+Copy RAM:pl/f000.bin NAS:perf/
+Echo "== MARK scrittura 2 file 4 KB" >>$O
+Copy RAM:pl/f000.bin NAS:perf/f001.bin
+Echo "== MARK delete 1 file" >>$O
+Delete NAS:perf/f000.bin QUIET
+Echo "== MARK delete 2 file" >>$O
+Delete NAS:perf/f001.bin QUIET
+NGNFS:build/os3/NFSDismount NFS0: >>$O
+Delete RAM:pl ALL QUIET >NIL:
+Echo "== FINE" >>$O

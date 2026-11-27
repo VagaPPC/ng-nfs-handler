@@ -1,0 +1,57 @@
+; M0 - test automatico pktlog-handler (eseguire con Execute)
+FailAt 21
+Set O NGNFS:build/m0-out.txt
+Delete NGNFS:build/pktlog.log $O RAM:pktlog.log QUIET >NIL:
+Echo "== versioni" >$O
+Version >>$O
+Version C:Assign FULL >>$O
+Version C:Mount FULL >>$O
+
+Echo "== T1 mount" >>$O
+Mount NGNFS:tools/pktlog-handler/test/PKT0 >>$O
+Mount NGNFS:tools/pktlog-handler/test/PKT1 >>$O
+Wait 2
+Assign DEVICES >>$O
+Assign VOLS >>$O
+
+Echo "== T2 comandi base" >>$O
+Info PKTLOG: >>$O
+Dir PKTLOG: >>$O
+List PKTLOG: >>$O
+CD PKTLOG:
+CD >>$O
+CD SYS:
+Type PKTLOG:nonesiste >>$O
+Assign >NIL: PKT1: EXISTS
+If NOT WARN
+  Info PKT1: >>$O
+EndIf
+
+Echo "== T4a dismount PKT0 con lock aperto" >>$O
+CD PKTLOG:
+Run >NIL: Wait 40
+CD SYS:
+Assign PKT0: DISMOUNT >>$O
+Echo "rc=$RC" >>$O
+Wait 25
+Assign DEVICES >>$O
+
+Echo "== T4b dismount PKT1 senza lock" >>$O
+Assign PKT1: DISMOUNT >>$O
+Echo "rc=$RC" >>$O
+Wait 25
+Assign DEVICES >>$O
+Assign VOLS >>$O
+
+Echo "== T5 accesso dopo dismount" >>$O
+; mai accedere a un device assente: aprirebbe un requester e bloccherebbe lo script
+Assign >NIL: PKT1: EXISTS
+If WARN
+  Echo "PKT1: non esiste piu' nella DosList" >>$O
+Else
+  Dir PKT1: >>$O
+EndIf
+Wait 25
+
+Copy RAM:pktlog.log NGNFS:build/pktlog-ram.log QUIET
+Echo "== FINE" >>$O

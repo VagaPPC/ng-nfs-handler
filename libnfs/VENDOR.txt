@@ -1,0 +1,1 @@
+libnfs-8.1.0 da https://github.com/sahlberg/libnfs (tag libnfs-8.1.0), copiato senza modifiche il 2026-11-26. Esclusi: examples, utils, tests, tools, win32, ps2/ps3, aros, tls.

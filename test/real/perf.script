@@ -1,0 +1,31 @@
+; Misura prestazioni su hardware reale (senza log). Richiede Assign NGNFS:
+FailAt 21
+Set O NGNFS:build/real-perf-out.txt
+Delete RAM:perf ALL QUIET >NIL:
+MakeDir RAM:perf
+Mount NGNFS:test/real/NFS0P >$O
+Wait 2
+List NAS:perf >NIL:
+Echo "== lettura 5 MB" >>$O
+Date >>$O
+Copy NAS:perf/big5.bin RAM:perf/
+Date >>$O
+Echo "== scrittura 5 MB" >>$O
+Date >>$O
+Copy RAM:perf/big5.bin NAS:perf/up5.bin
+Date >>$O
+Echo "== lettura 100 file da 4 KB" >>$O
+Date >>$O
+Copy NAS:perf/small RAM:perf/small ALL QUIET
+Date >>$O
+Echo "== scrittura 100 file da 4 KB" >>$O
+Date >>$O
+Copy RAM:perf/small NAS:perf/up_small ALL QUIET
+Date >>$O
+Echo "== Delete 100 file" >>$O
+Date >>$O
+Delete NAS:perf/up_small ALL QUIET
+Date >>$O
+NGNFS:build/os3/NFSDismount NFS0: >>$O
+Delete RAM:perf ALL QUIET >NIL:
+Echo "== FINE" >>$O

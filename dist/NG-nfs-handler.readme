@@ -1,0 +1,34 @@
+Short:        NFSv3 client filesystem handler
+Author:       VagaPPC (Benedetto Lorello)
+Uploader:     VagaPPC (Benedetto Lorello)
+Type:         comm/net
+Version:      0.9
+Architecture: m68k-amigaos >= 3.1.0
+Distribution: Aminet
+Requires:     68020+, bsdsocket.library (Roadshow, AmiTCP, Miami, ...)
+
+NG-nfs-handler mounts NFS exports from a Linux (or any NFSv3) server as a
+normal AmigaDOS volume. It is a DOS handler: put it in L:, mount it with a
+standard mountlist and unmount it with NFSDismount.
+
+Features
+  - NFSv3 over TCP, libnfs 8.1.0 built in (no external libraries)
+  - read and write: files, directories, rename, delete, protection, dates,
+    hard links and relative soft links
+  - case-insensitive names like every Amiga filesystem (optional)
+  - Latin-1 <-> UTF-8 file name conversion, reversible %XX escapes
+  - DOS notification (StartNotify) by polling
+  - lazy mount: can be mounted at boot before the TCP/IP stack is up
+  - automatic reconnection when the server restarts
+  - clean unmount with NFSDismount
+
+Tested on a Vampire V4 (Roadshow 4.364) and in Amiberry. On the Vampire it
+is as fast as smb2fs (about 2.5 MB/s reading, limited by the network
+hardware).
+
+This is a BETA: please read Docs/nfs-handler.txt, especially "Behaviour and
+limits", before using it on data you care about.
+
+Italian documentation included (Docs/nfs-handler.it.txt).
+
+License: LGPL 2.1, complete source code included (Source/).

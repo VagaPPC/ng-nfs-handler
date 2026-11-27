@@ -1,0 +1,186 @@
+NG-nfs-handler 0.9 beta -- NFS client filesystem handler for AmigaOS
+=====================================================================
+
+NG-nfs-handler mounts NFS exports from a Linux (or any NFSv3) server as a
+normal AmigaDOS volume. It is a DOS handler you put in L: and mount with a
+standard mountlist; it is unmounted with the NFSDismount command.
+
+  - NFSv3 over TCP (libnfs 8.1.0 inside, no external libraries needed)
+  - read and write: files, directories, rename, delete, protection, dates,
+    hard links and relative soft links
+  - case-insensitive names like every Amiga filesystem (optional)
+  - Latin-1 <-> UTF-8 file name conversion
+  - DOS notification (StartNotify) by polling
+  - lazy mount: the network is contacted on first access, so the volume can
+    be mounted at boot before the TCP/IP stack is up
+  - automatic reconnection when the server restarts
+
+Tested on: AmigaOS 3.1 ROM + 3.9 (Vampire V4, Roadshow 4.364), AmigaOS 3.9
+in Amiberry (bsdsocket emulation).
+
+
+1. Requirements
+---------------
+
+  - AmigaOS 3.1 or later, 68020 or better
+  - a TCP/IP stack providing bsdsocket.library (Roadshow, AmiTCP, Miami,
+    Genesis, or the bsdsocket emulation of UAE/Amiberry)
+  - an NFS server with NFSv3 over TCP enabled (Linux nfs-kernel-server
+    does this by default)
+
+
+2. Installation
+---------------
+
+  Copy L/nfs-handler     L:
+  Copy C/NFSDismount     C:
+
+Then copy the example mountlist Storage/DOSDrivers/NFS0 to
+DEVS:DOSDrivers/ (to mount at boot) or to SYS:Storage/DOSDrivers/ (to mount
+by hand), and edit the Startup line (see section 4).
+
+Mount and use it:
+
+  Mount NFS0:
+  Dir NAS:
+
+NFS0: is the device, NAS: is the volume name (VOLUME= option).
+To unmount:
+
+  NFSDismount NFS0:
+
+Do NOT use "Assign NFS0: DISMOUNT": on AmigaOS 3.x it removes the device
+without telling the handler. nfs-handler notices it and quits by itself
+when nothing uses the volume any more, but NFSDismount is the clean way.
+
+
+3. Example mountlist
+--------------------
+
+  Handler   = L:nfs-handler
+  StackSize = 32768
+  Priority  = 5
+  GlobVec   = -1
+  Activate  = 1
+  Startup   = "SERVER=192.168.1.100 EXPORT=/export/amiga VOLUME=NAS UID=1000 GID=1000"
+
+The Startup string MUST be enclosed in double quotes (Mount rejects it
+otherwise). Keep Priority = 5: the handler must run at a higher priority
+than the shell that mounts it.
+
+
+4. Startup options
+------------------
+
+  SERVER=host        NFS server name or IP address (required). Use the IP
+                     address if your stack has no DNS configured.
+  EXPORT=/path       exported directory on the server (required)
+  VOLUME=name        Amiga volume name (default: the device name)
+  UID=n  GID=n       user/group id sent to the server (AUTH_SYS);
+                     default 65534 (nobody). Files you create belong to it.
+  CASE=INSENSITIVE   (default) "readme.txt" finds "README.TXT", and writing
+                     to an existing name with different case overwrites the
+                     existing file instead of creating a second one
+  CASE=SENSITIVE     exact names only (faster on huge directories)
+  CHARSET=LATIN1     (default) server names are UTF-8, Amiga names Latin-1;
+                     characters outside Latin-1 (and ':' '%') are shown as
+                     %XX sequences, so every file stays reachable
+  CHARSET=RAW        no conversion
+  READONLY           mount write protected
+  SYNC=NO            (default) fast UNSTABLE writes, committed on Close()
+  SYNC=YES           every write is committed immediately (slower, safest)
+  UMASK=022          permission mask for new files/directories (octal)
+  RSIZE=16384        maximum bytes per NFS read
+  WSIZE=16384        maximum bytes per NFS write
+  PAR=4              parallel read/write requests per DOS packet (1-16)
+  TIMEOUT=10         seconds before an NFS request fails
+  NOTIFYPOLL=4       seconds between notification polls (0 = disable
+                     DOS notification)
+  LOG=file           write a debug log (every DOS packet, NFS calls and
+                     timings). Use RAM:, not a network volume. Slow!
+
+
+5. Server setup (Linux)
+-----------------------
+
+/etc/exports example:
+
+  /export/amiga  192.168.1.0/24(rw,sync,no_subtree_check,all_squash,anonuid=1000,anongid=1000)
+
+then "exportfs -ra".
+
+  all_squash,anonuid=,anongid=  every Amiga access is mapped to one Linux
+                user: simple and consistent with the UID/GID options.
+  insecure      needed ONLY if the client cannot use ports below 1024. Real
+                Amiga stacks can; the UAE/Amiberry bsdsocket emulation can
+                not (it runs as a normal user), so add "insecure" there.
+  async         much faster for many small files (create/delete), at the
+                cost of losing the last changes if the SERVER crashes.
+                With "sync" (default) every metadata operation waits for the
+                server's disk.
+
+Make sure the export directory belongs to the anonuid user, or writes fail
+with "write protected".
+
+
+6. Behaviour and limits
+-----------------------
+
+  - Protection bits: R, W, E map to the owner bits of the Unix mode; D
+    follows W. H, S, P, A and file comments are accepted and discarded.
+  - File sizes are 32 bit on AmigaOS 3.x: files larger than 2 GB are shown
+    as 2 GB and cannot be read past that point.
+  - Soft links: only relative targets can be created. Links on the server
+    are followed transparently (a link to a directory looks like a
+    directory).
+  - Locks are local: exclusive locks are not seen by other NFS clients.
+  - DeleteFile() of an open or locked object fails with "object in use".
+  - SYNC=NO: if the server reboots between a write and the Close() of the
+    file, the last written data can be lost without an error (the NFS write
+    verifier is not checked yet). Use SYNC=YES if this matters.
+  - Notification works by polling (NFS has no change notification).
+    Changes made through the handler are notified at once. Note that
+    Directory Opus refreshes its listers by itself.
+  - Names with %XX sequences open fine from Workbench and Directory Opus;
+    the AmigaOS 3.9 Shell removes '%' from typed names.
+  - If the server restarts, the operation running at that moment fails
+    with "No disk present" (Retry/Cancel requester); press Retry. Open
+    files are reopened automatically. If the server host is completely
+    unreachable, the first access waits for the stack's TCP connect timeout.
+
+
+7. Troubleshooting
+------------------
+
+  - Mount fails / "No disk present": check the network (ping the server),
+    use the IP address in SERVER=, check that NFSv3 over TCP is enabled
+    (rpcinfo -p server on Linux must list nfs version 3, tcp).
+  - "Permission denied" at mount: the export does not allow your Amiga's
+    address, or needs "insecure" (emulators).
+  - Writes fail with "write protected": the export directory is not
+    writable by the anonuid/UID user.
+  - NFSDismount says "object in use": something still uses the volume
+    (a Shell with CD on it, a Directory Opus lister, an open file). With
+    LOG= the log lists every open lock and the task that owns it.
+  - For a bug report: add LOG=RAM:nfs-handler.log to the Startup line,
+    reproduce, and send the log.
+
+
+8. Included tools
+-----------------
+
+  C/NFSDismount   DEVICE/A,KEEPSEG/S   clean unmount (sends ACTION_DIE)
+  Tools/nfsls     SERVER/A,EXPORT/A,PATH,UID/N,GID/N,WRITETEST/S
+                  standalone NFS test client (lists a directory)
+  Tools/NotifyTest PATH/A,SECS/N,INITIAL/S  prints DOS notifications
+
+
+9. License
+----------
+
+NG-nfs-handler is free software, distributed under the GNU Lesser General
+Public License version 2.1 (see COPYING). It includes libnfs by Ronnie
+Sahlberg (LGPL 2.1 / BSD, see Docs/COPYING.libnfs). The complete source
+code is in the Source/ drawer of the archive.
+
+Copyright (C) 2026 VagaPPC (Benedetto Lorello)

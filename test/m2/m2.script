@@ -1,0 +1,43 @@
+; M2 - test nfs-handler read-only
+FailAt 21
+Set O NGNFS:build/m2-out.txt
+Delete NGNFS:build/nfs-handler.log $O NGNFS:build/m2-copy.bin QUIET >NIL:
+Echo "== mount" >$O
+Mount NGNFS:test/m2/NFS0 >>$O
+Wait 1
+Echo "== Info prima del mount NFS" >>$O
+Info NFS0: >>$O
+Echo "== Dir" >>$O
+Dir NAS: >>$O
+Echo "== List" >>$O
+List NAS: >>$O
+Echo "== Type" >>$O
+Type NAS:Readme.txt >>$O
+Echo "== Type latin1" >>$O
+Type "NAS:Àccentato é.txt" >>$O
+Echo "== Type escape" >>$O
+Type "NAS:%E6%97%A5%E6%9C%AC.txt" >>$O
+Echo "== Type inesistente" >>$O
+Type NAS:nonesiste >>$O
+Echo "== List sub e path relativi" >>$O
+List NAS:dir1/sub >>$O
+CD NAS:dir1/sub
+CD >>$O
+CD /
+CD >>$O
+CD /
+CD >>$O
+CD SYS:
+Echo "== Copy binario" >>$O
+Copy NAS:dir1/sub/file.bin NGNFS:build/m2-copy.bin >>$O
+Echo "rc=$RC" >>$O
+Echo "== symlink" >>$O
+List NAS:link_a_dir1/ >>$O
+Echo "== Info dopo mount" >>$O
+Info NAS: >>$O
+Echo "== Version" >>$O
+Version NGNFS:build/os3/nfs-handler >>$O
+Echo "== Dismount" >>$O
+NGNFS:build/os3/NFSDismount NFS0: >>$O
+Echo "rc=$RC" >>$O
+Echo "== FINE" >>$O

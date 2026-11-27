@@ -1,0 +1,19 @@
+; M2b - diagnosi: nome con escape, CD /, symlink
+FailAt 21
+Set O NGNFS:build/m2b-out.txt
+Delete NGNFS:build/nfs-handler.log $O QUIET >NIL:
+Mount NGNFS:test/m2/NFS0 >$O
+Wait 1
+Echo "== List (symlink come dir?)" >>$O
+List NAS: >>$O
+Echo "== Type escape" >>$O
+Type "NAS:%E6%97%A5%E6%9C%AC.txt" >>$O
+Echo "== CD" >>$O
+CD NAS:dir1/sub
+CD >>$O
+CD /
+CD >>$O
+CD SYS:
+Echo "== Dismount" >>$O
+NGNFS:build/os3/NFSDismount NFS0: >>$O
+Echo "== FINE" >>$O

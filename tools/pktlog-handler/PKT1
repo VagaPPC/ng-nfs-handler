@@ -1,0 +1,7 @@
+/* pktlog-handler -- variante con Startup SENZA virgolette (test di Mount) */
+Handler   = L:pktlog-handler
+StackSize = 8192
+Priority  = 5
+GlobVec   = -1
+Activate  = 1
+Startup   = VOLUME=PKTLOG1

@@ -1,0 +1,40 @@
+; Test funzionale su hardware reale (Roadshow). Richiede Assign NGNFS:
+FailAt 21
+Set O NGNFS:build/real-func-out.txt
+Delete RAM:nfs-handler.log RAM:rt ALL QUIET >NIL:
+MakeDir RAM:rt
+Echo "== versioni" >$O
+Version >>$O
+Version bsdsocket.library >>$O
+Mount NGNFS:test/real/NFS0 >>$O
+Wait 2
+Echo "== lettura" >>$O
+Info NAS: >>$O
+List NAS: >>$O
+Type NAS:readme.txt >>$O
+Type "NAS:àCCENTATO É.TXT" >>$O
+List NAS:DIR1/SUB >>$O
+List NAS:link_a_dir1/ >>$O
+Copy NAS:dir1/sub/file.bin RAM:rt/ >>$O
+Echo "rc=$RC" >>$O
+Copy RAM:rt/file.bin NGNFS:build/real-copy.bin >>$O
+Echo "== scrittura" >>$O
+Echo "prima riga" >NAS:nuovo.txt
+Echo >>NAS:nuovo.txt "seconda riga"
+Type NAS:nuovo.txt >>$O
+Copy RAM:rt/file.bin NAS:copia.bin >>$O
+Echo "rc=$RC" >>$O
+MakeDir NAS:NuovaDir >>$O
+Rename NAS:nuovo.txt NAS:NuovaDir/rinominato.txt >>$O
+Rename NAS:copia.bin NAS:COPIA.BIN >>$O
+Protect NAS:NuovaDir/rinominato.txt w SUB >>$O
+List NAS:NuovaDir >>$O
+List NAS:#?.BIN >>$O
+Delete NAS:NuovaDir ALL QUIET >>$O
+Delete NAS:COPIA.BIN QUIET >>$O
+Echo "rc=$RC" >>$O
+Echo "== dismount" >>$O
+NGNFS:build/os3/NFSDismount NFS0: >>$O
+Copy RAM:nfs-handler.log NGNFS:build/real-func.log QUIET
+Delete RAM:rt ALL QUIET >NIL:
+Echo "== FINE" >>$O

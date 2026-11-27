@@ -1,0 +1,57 @@
+; M3 - test scrittura nfs-handler
+FailAt 21
+Set O NGNFS:build/m3-out.txt
+Delete NGNFS:build/nfs-handler.log $O NGNFS:build/m3-copy.bin QUIET >NIL:
+Mount NGNFS:test/m2/NFS0 >$O
+Wait 1
+Echo "== Info (deve essere Read/Write)" >>$O
+Info NAS: >>$O
+Echo "== crea file" >>$O
+Echo "prima riga" >NAS:nuovo.txt
+Type NAS:nuovo.txt >>$O
+Echo "== append" >>$O
+Echo >>NAS:nuovo.txt "seconda riga"
+Type NAS:nuovo.txt >>$O
+Echo "== copia binario 300 KB sul server e ritorno" >>$O
+Copy NAS:dir1/sub/file.bin NAS:copia.bin >>$O
+Echo "rc=$RC" >>$O
+Copy NAS:copia.bin NGNFS:build/m3-copy.bin >>$O
+Echo "rc=$RC" >>$O
+Echo "== MakeDir + copia dentro" >>$O
+MakeDir NAS:NuovaDir >>$O
+Echo "rc=$RC" >>$O
+Copy NAS:Readme.txt NAS:NuovaDir/ >>$O
+List NAS:NuovaDir >>$O
+Echo "== Rename in sottodirectory" >>$O
+Rename NAS:nuovo.txt NAS:NuovaDir/rinominato.txt >>$O
+Echo "rc=$RC" >>$O
+List NAS:NuovaDir >>$O
+Echo "== Rename solo maiuscole" >>$O
+Rename NAS:copia.bin NAS:COPIA.BIN >>$O
+Echo "rc=$RC" >>$O
+List NAS:#?.bin >>$O
+Echo "== Protect -w e +w" >>$O
+Protect NAS:NuovaDir/rinominato.txt w SUB >>$O
+List NAS:NuovaDir/rinominato.txt >>$O
+Protect NAS:NuovaDir/rinominato.txt w ADD >>$O
+List NAS:NuovaDir/rinominato.txt >>$O
+Echo "== SetDate" >>$O
+SetDate NAS:NuovaDir/rinominato.txt 01-Jan-20 12:00:00 >>$O
+List NAS:NuovaDir/rinominato.txt >>$O
+Echo "== sovrascrittura case-insensitive (maiuscolo.txt -> MAIUSCOLO.TXT)" >>$O
+Echo "sovrascritto" >NAS:maiuscolo.txt
+Type NAS:MAIUSCOLO.TXT >>$O
+List NAS:#?.txt >>$O
+Echo "== Rename su destinazione esistente (deve fallire)" >>$O
+Rename NAS:COPIA.BIN NAS:Readme.txt >>$O
+Echo "rc=$RC" >>$O
+Echo "== Delete" >>$O
+Delete NAS:NuovaDir ALL QUIET >>$O
+Echo "rc=$RC" >>$O
+Delete NAS:COPIA.BIN >>$O
+Echo "rc=$RC" >>$O
+Echo "x" >NAS:MAIUSCOLO.TXT
+List NAS: >>$O
+Echo "== Dismount" >>$O
+NGNFS:build/os3/NFSDismount NFS0: >>$O
+Echo "== FINE" >>$O
