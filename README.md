@@ -49,4 +49,4 @@ default location used by the Makefile.
 GNU Lesser General Public License 2.1 (see `COPYING`). libnfs is LGPL 2.1 /
 BSD (see `libnfs/COPYING`).
 
-Copyright (C) 2026 VagaPPC (Benedetto Lorello)
+Copyright (C) 2026 @AUTHOR@
