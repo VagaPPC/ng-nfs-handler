@@ -72,4 +72,13 @@ void  plat_lock_free(void *lock);
 BOOL plat_collect_ok(void);
 BOOL plat_collect(LONG type, APTR object);
 
+/* Risposta al pacchetto di smontaggio (ACTION_DIE / ACTION_SHUTDOWN), da
+ * chiamare sotto Forbid() con dn_Task gia' azzerato. Dopo la risposta chi
+ * smonta puo' scaricare il segmento dell'handler: non si deve piu' eseguire
+ * codice che possa interrompere il Forbid(). OS3: risponde subito (dopo
+ * resta solo la distruzione del pool). OS4: la risposta viene rimandata alla
+ * fine di plat_start, dopo l'uscita di clib4 (che chiude file e librerie e
+ * puo' fare Wait()). */
+void plat_reply_die(struct DosPacket *pkt);
+
 #endif

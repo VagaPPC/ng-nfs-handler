@@ -118,6 +118,13 @@ void plat_lock_free(void *lock)
 BOOL plat_collect_ok(void) { return FALSE; }
 BOOL plat_collect(LONG type, APTR object) { return FALSE; }
 
+/* OS3: dopo la risposta restano DeleteMsgPort e la distruzione del pool,
+ * che non interrompono il Forbid(); poi il processo termina */
+void plat_reply_die(struct DosPacket *pkt)
+{
+    ReplyPkt(pkt, DOSTRUE, 0);
+}
+
 /* OS3: l'evento si scrive su input.device (IND_WRITEEVENT) */
 void plat_disk_event(BOOL inserted)
 {

@@ -104,6 +104,11 @@ static void bstr_copy(BSTR b, char *out, int max)
     out[n] = 0;
 }
 
+/* Pacchetto di smontaggio da restituire alla fine di plat_start: dopo la
+ * risposta Dismount puo' scaricare il segmento, quindi prima deve finire
+ * tutto (uscita di clib4 compresa). Vedi plat_reply_die(). */
+static struct DosPacket *die_pkt;
+
 static int plat_main(int argc, char **argv)
 {
     handler_main(&hs);
@@ -195,6 +200,11 @@ int32 plat_start(STRPTR argstr, int32 arglen, struct ExecBase *sysbase)
     if (nil_out) { IDOS->SelectOutput(old_out); IDOS->Close(nil_out); }
     IDOS->SetConsolePort(old_con);
 out:
+    /* Da qui in poi niente che possa fare Wait(): la risposta allo
+     * smontaggio permette di scaricare il nostro codice, e il Forbid()
+     * resta fino alla fine del processo. */
+    IExec->Forbid();
+    if (die_pkt && IDOS) IDOS->ReplyPkt(die_pkt, DOSTRUE, 0);
     if (IDOS) IExec->DropInterface((struct Interface *)IDOS);
     if (DOSBase) IExec->CloseLibrary(DOSBase);
     IExec->Release();
@@ -207,6 +217,12 @@ out:
 int  mini_init(void) { return 0; }
 void mini_exit(void) { }
 const char *mini_errstr(int e) { return strerror(e); }
+
+void plat_reply_die(struct DosPacket *pkt)
+{
+    die_pkt = pkt;
+}
+
 void (*mini_assert_hook)(const char *file, int line, const char *expr);
 
 /* assert() di clib4: niente abort() in un handler. Si registra e si ferma

@@ -2992,7 +2992,7 @@ void handler_main(const struct HandlerStartup *hs)
     Forbid();
     if (die_pkt) {
         devnode->dn_Task = NULL;
-        ReplyPkt(die_pkt, DOSTRUE, 0);
+        plat_reply_die(die_pkt);
     }
     while ((msg = GetMsg(pktport))) {
         pkt = (struct DosPacket *)msg->mn_Node.ln_Name;
