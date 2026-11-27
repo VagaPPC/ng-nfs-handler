@@ -1,0 +1,30 @@
+; Scenario reale (AmigaOS 4.1): server raggiungibile, icona TI9.info nel
+; cassetto SYS:Storage/DOSDrivers/ (tooltype VOLUME=TTICON, che prevale
+; sulla Startup), uso vero del volume (Dir, List), Dismount senza richieste
+; in sospeso. Serve a vedere se il crash del Workbench capita anche nell'uso
+; normale. NON toccare il Workbench. Dopo un riavvio pulito.
+; Richiede Assign NGNFS: e test/os4/local/TI9 (+ .info, fuori da git)
+; Risultati: NGNFS:build/os4-ti9-out.txt e NGNFS:build/os4-ti9.log
+FailAt 21
+Set O NGNFS:build/os4-ti9-out.txt
+Delete NGNFS:build/os4-ti9.log QUIET >NIL: *>NIL:
+Echo "== copia mountlist e icona nel cassetto" >$O
+Copy NGNFS:test/os4/local/TI9#? SYS:Storage/DOSDrivers/ QUIET >>$O *>>$O
+Mount SYS:Storage/DOSDrivers/TI9 >>$O *>>$O
+Wait 3
+Echo "== volumi" >>$O
+Assign VOLS >>$O
+Echo "== Dir TTICON:" >>$O
+Dir TTICON: >>$O *>>$O
+Echo "== List TTICON:" >>$O
+List TTICON: >>$O *>>$O
+Wait 2
+Echo "== Dismount" >>$O
+Dismount TI9: >>$O *>>$O
+Echo "rc=$RC" >>$O
+Delete SYS:Storage/DOSDrivers/TI9#? QUIET >>$O *>>$O
+Echo "== attesa 2 minuti" >>$O
+Date >>$O
+Wait 120
+Echo "== FINE senza crash" >>$O
+Date >>$O
