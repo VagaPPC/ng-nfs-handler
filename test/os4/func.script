@@ -1,55 +1,57 @@
 ; Test funzionale su AmigaOS 4.1 (handler PPC con clib4). Richiede Assign NGNFS:
 ; Risultati: NGNFS:build/os4-func-out.txt e NGNFS:build/os4-func.log
+; "*>>$O": anche i messaggi di errore dei comandi (flusso di errore) nel file
 FailAt 21
 Set O NGNFS:build/os4-func-out.txt
 ; il log dell'handler va diretto su NGNFS: (sopravvive a un blocco)
 Delete NGNFS:build/os4-func.log RAM:rt ALL QUIET >NIL:
 MakeDir RAM:rt
 Echo "== versioni" >$O
-Version >>$O
-Version bsdsocket.library >>$O
-Version clib4.library >>$O
-Version NGNFS:build/os4/nfs-handler >>$O
+Version >>$O *>>$O
+Version bsdsocket.library >>$O *>>$O
+Version clib4.library >>$O *>>$O
+Version NGNFS:build/os4/nfs-handler >>$O *>>$O
 ; parametri della rete locale in test/os4/local/ (non nel repository)
 If EXISTS NGNFS:test/os4/local/NFS0
-  Mount NGNFS:test/os4/local/NFS0 >>$O
+  Mount NGNFS:test/os4/local/NFS0 >>$O *>>$O
 Else
-  Mount NGNFS:test/os4/NFS0 >>$O
+  Mount NGNFS:test/os4/NFS0 >>$O *>>$O
 EndIf
 Wait 2
 Echo "== lettura" >>$O
-Info NAS: >>$O
-List NAS: >>$O
-Type NAS:readme.txt >>$O
-Type "NAS:àCCENTATO É.TXT" >>$O
-List NAS:DIR1/SUB >>$O
-List NAS:link_a_dir1/ >>$O
-Copy NAS:dir1/sub/file.bin RAM:rt/ >>$O
+Info NAS: >>$O *>>$O
+List NAS: >>$O *>>$O
+Type NAS:readme.txt >>$O *>>$O
+Type "NAS:àCCENTATO É.TXT" >>$O *>>$O
+List NAS:DIR1/SUB >>$O *>>$O
+List NAS:link_a_dir1/ >>$O *>>$O
+Copy NAS:dir1/sub/file.bin RAM:rt/ >>$O *>>$O
 Echo "rc=$RC" >>$O
-Copy RAM:rt/file.bin NGNFS:build/os4-copy.bin >>$O
+Copy RAM:rt/file.bin NGNFS:build/os4-copy.bin >>$O *>>$O
 Echo "== scrittura" >>$O
 Echo "prima riga" >NAS:nuovo.txt
 Echo >>NAS:nuovo.txt "seconda riga"
-Type NAS:nuovo.txt >>$O
-Copy RAM:rt/file.bin NAS:copia.bin >>$O
+Type NAS:nuovo.txt >>$O *>>$O
+Copy RAM:rt/file.bin NAS:copia.bin >>$O *>>$O
 Echo "rc=$RC" >>$O
-MakeDir NAS:NuovaDir >>$O
-Rename NAS:nuovo.txt NAS:NuovaDir/rinominato.txt >>$O
-Rename NAS:copia.bin NAS:COPIA.BIN >>$O
-Protect NAS:NuovaDir/rinominato.txt w SUB >>$O
-List NAS:NuovaDir >>$O
-List NAS:#?.BIN >>$O
-Delete NAS:NuovaDir ALL QUIET >>$O
-Delete NAS:COPIA.BIN QUIET >>$O
+MakeDir NAS:NuovaDir >>$O *>>$O
+Rename NAS:nuovo.txt NAS:NuovaDir/rinominato.txt >>$O *>>$O
+Rename NAS:copia.bin NAS:COPIA.BIN >>$O *>>$O
+Protect NAS:NuovaDir/rinominato.txt w SUB >>$O *>>$O
+List NAS:NuovaDir >>$O *>>$O
+List NAS:#?.BIN >>$O *>>$O
+Delete NAS:NuovaDir ALL QUIET >>$O *>>$O
+Delete NAS:COPIA.BIN QUIET >>$O *>>$O
 Echo "rc=$RC" >>$O
-Echo "== dismount (Assign DISMOUNT)" >>$O
-Assign NFS0: DISMOUNT >>$O
+; OS4 V54+: lo smontaggio sta in C:Dismount (Assign DISMOUNT non c'e' piu')
+Echo "== dismount (C:Dismount)" >>$O
+Dismount NFS0: >>$O *>>$O
 Set DRC $RC
 Echo "rc=$DRC" >>$O
 If VAL $DRC GT 0
   ; ripiego: NFSDismount (m68k, gira in emulazione) manda ACTION_DIE
   Echo "== dismount (NFSDismount)" >>$O
-  NGNFS:build/os3/NFSDismount NFS0: >>$O
+  NGNFS:build/os3/NFSDismount NFS0: >>$O *>>$O
   Echo "rc=$RC" >>$O
 EndIf
 Wait 2

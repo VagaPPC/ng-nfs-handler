@@ -18,8 +18,8 @@ Wait 3
 Echo "== pacchetto di prova (Info: errore atteso)" >>$O
 Info PROBE: >>$O
 Wait 2
-Echo "== dismount (Assign DISMOUNT)" >>$O
-Assign PROBE: DISMOUNT >>$O
+Echo "== dismount (C:Dismount)" >>$O
+Dismount PROBE: >>$O
 Echo "rc=$RC" >>$O
 ; l'handler esce da solo dopo 60 s se il dismount non gli manda niente
 Set N 0
