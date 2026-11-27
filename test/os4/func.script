@@ -4,7 +4,7 @@
 FailAt 21
 Set O NGNFS:build/os4-func-out.txt
 ; il log dell'handler va diretto su NGNFS: (sopravvive a un blocco)
-Delete NGNFS:build/os4-func.log RAM:rt ALL QUIET >NIL:
+Delete NGNFS:build/os4-func.log RAM:rt ALL QUIET >NIL: *>NIL:
 MakeDir RAM:rt
 Echo "== versioni" >$O
 Version >>$O *>>$O
@@ -55,5 +55,5 @@ If VAL $DRC GT 0
   Echo "rc=$RC" >>$O
 EndIf
 Wait 2
-Delete RAM:rt ALL QUIET >NIL:
+Delete RAM:rt ALL QUIET >NIL: *>NIL:
 Echo "== FINE" >>$O

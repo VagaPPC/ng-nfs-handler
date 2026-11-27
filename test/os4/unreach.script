@@ -1,0 +1,20 @@
+; Server NFS irraggiungibile (AmigaOS 4.1). Richiede Assign NGNFS:
+; Atteso: ogni accesso fallisce dopo ~10 s (TIMEOUT=10) con il requester
+; del DOS; "Riprova" rifa' il mount (altri ~10 s), "Annulla" chiude.
+; Risultati: NGNFS:build/os4-unreach-out.txt e NGNFS:build/os4-unreach.log
+FailAt 21
+Set O NGNFS:build/os4-unreach-out.txt
+Delete NGNFS:build/os4-unreach.log QUIET >NIL: *>NIL:
+Echo "== mount" >$O
+Mount NGNFS:test/os4/NFS9 >>$O *>>$O
+Echo "rc=$RC" >>$O
+Wait 2
+Echo "== List NAS9: (requester: premi Riprova una volta, poi Annulla)" >>$O
+Date >>$O
+List NAS9: >>$O *>>$O
+Echo "rc=$RC" >>$O
+Date >>$O
+Echo "== dismount" >>$O
+Dismount NFS9: >>$O *>>$O
+Echo "rc=$RC" >>$O
+Echo "== FINE" >>$O

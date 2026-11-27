@@ -257,6 +257,7 @@ const char *mini_errstr(int e)
     case 60:  return "Operation timed out";
     case 61:  return "Connection refused";
     case 63:  return "File name too long";
+    case 64:  return "Host is down";
     case 65:  return "No route to host";
     case 66:  return "Directory not empty";
     case 70:  return "Stale NFS file handle";

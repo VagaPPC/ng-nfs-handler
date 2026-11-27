@@ -2,7 +2,7 @@
 ; Risultati: NGNFS:build/os4-probe-out.txt e NGNFS:build/os4-probe.log
 FailAt 21
 Set O NGNFS:build/os4-probe-out.txt
-Delete NGNFS:build/os4-probe.log QUIET >NIL:
+Delete NGNFS:build/os4-probe.log QUIET >NIL: *>NIL:
 Echo "== versioni" >$O
 Version >>$O
 Version clib4.library >>$O

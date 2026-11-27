@@ -167,6 +167,8 @@ static char                devname[64];
 static struct nfs_context *nfs;
 static int                 mstate = MS_IDLE;
 static BOOL                nfs_reset;       /* distruggere il contesto nel loop */
+static ULONG               ticks;           /* battiti del timer (HEARTBEAT_SECS) */
+static ULONG               mount_tick;      /* battito di inizio del mount in corso */
 static struct List         pending;         /* pacchetti in attesa del mount */
 
 static struct NLock       *locks;
@@ -1859,7 +1861,23 @@ static BOOL need_mount(struct DosPacket *pkt)
         return FALSE;
     }
     mstate = MS_MOUNTING;
+    mount_tick = ticks;
     return FALSE;
+}
+
+/* Mount senza risposta entro TIMEOUT secondi (server spento, IP sbagliato):
+ * libnfs non limita la connessione TCP, che altrimenti aspetterebbe il
+ * timeout dello stack (oltre un minuto). Si chiude il contesto e si
+ * risponde ERROR_NO_DISK: il requester del DOS offre "Riprova", che rifa'
+ * il mount da capo. Da chiamare SOLO dal loop principale. */
+static void mount_timeout(void)
+{
+    plog("!! mount %s:%s: nessuna risposta in %ld s", opt_server, opt_export,
+         (long)opt_timeout);
+    mstate = MS_IDLE;
+    if (nfs) { nfs_destroy_context(nfs); nfs = NULL; }
+    nfs_reset = FALSE;              /* cb_mount puo' averlo rimesso */
+    fail_pending(ERROR_NO_DISK);
 }
 
 /* ------------------------------------------------------------------------ */
@@ -2368,7 +2386,7 @@ void handler_main(const struct HandlerStartup *hs)
     struct MsgPort   *tport = NULL;
     timereq_t *treq = NULL;
     BOOL  timer_ok = FALSE, timer_pending = FALSE, running = TRUE;
-    ULONG tick = 0, spins = 0;
+    ULONG spins = 0;
     char *c;
 
     me = (struct Process *)FindTask(NULL);
@@ -2492,11 +2510,14 @@ void handler_main(const struct HandlerStartup *hs)
 
         if (tsig && GetMsg(tport)) {
             timer_pending = FALSE;
-            tick++;
+            ticks++;
             if (nfs && fd >= 0) nfs_service(nfs, 0);     /* timeout RPC */
-            if (tick % ORPHAN_CHECK_EVERY == 0) check_orphan();
+            if (ticks % ORPHAN_CHECK_EVERY == 0) check_orphan();
+            if (mstate == MS_MOUNTING &&
+                ticks - mount_tick >= (ULONG)((opt_timeout + HEARTBEAT_SECS - 1) / HEARTBEAT_SECS))
+                mount_timeout();
             if (opt_notifypoll && notifies &&
-                tick % ((opt_notifypoll + HEARTBEAT_SECS - 1) / HEARTBEAT_SECS) == 0)
+                ticks % ((opt_notifypoll + HEARTBEAT_SECS - 1) / HEARTBEAT_SECS) == 0)
                 notify_poll_all();
             if (orphan_exit) {
                 running = FALSE;

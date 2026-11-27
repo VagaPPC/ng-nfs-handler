@@ -1,0 +1,8 @@
+/* Prova server irraggiungibile (AmigaOS 3.x): 192.168.1.100 non esiste.
+   Richiede Assign NGNFS: */
+Handler   = NGNFS:build/os3/nfs-handler
+StackSize = 32768
+Priority  = 5
+GlobVec   = -1
+Activate  = 1
+Startup   = "SERVER=192.168.1.100 EXPORT=/export/amiga VOLUME=NAS9 TIMEOUT=10 LOG=NGNFS:build/real-unreach.log"
