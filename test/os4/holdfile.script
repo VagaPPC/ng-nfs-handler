@@ -1,0 +1,2 @@
+; Tiene aperto NAS:busy-run.txt per 15 s (usato da busy.script con Run)
+Wait 15 >NAS:busy-run.txt

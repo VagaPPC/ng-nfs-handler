@@ -52,4 +52,24 @@ uint64_t plat_eclock_read(void);
  * fallita. Con fd < 0 aspetta solo i segnali. */
 int plat_wait(int fd, int events, ULONG *sigs);
 
+/* Evento globale "disco inserito/tolto" (IECLASS_DISKINSERTED/REMOVED),
+ * da mandare dopo aver aggiunto/tolto il volume: il Workbench aggiorna
+ * le icone. */
+void plat_disk_event(BOOL inserted);
+
+/* Lock pubblici dell'handler (struct NLock, con la FileLock in testa).
+ * OS4: allocati con AllocDosObject(DOS_LOCK), condizione perche' il
+ * lockhandler del DOS li accetti con ACTION_COLLECT. Memoria azzerata. */
+void *plat_lock_alloc(ULONG size);
+void  plat_lock_free(void *lock);
+
+/* Smontaggio con oggetti aperti (OS4, dos.dospackets/ACTION_SHUTDOWN):
+ * plat_collect_ok() dice se la piattaforma ha il lockhandler; plat_collect()
+ * gli cede un oggetto pubblico e ritorna TRUE se accettato. */
+#define PLAT_COLLECT_LOCK        1
+#define PLAT_COLLECT_FILEHANDLE  2
+#define PLAT_COLLECT_NOTIFY      3
+BOOL plat_collect_ok(void);
+BOOL plat_collect(LONG type, APTR object);
+
 #endif

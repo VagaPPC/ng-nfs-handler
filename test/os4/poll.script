@@ -1,0 +1,21 @@
+; Chi interroga NFS0: di continuo? (OS4) Richiede Assign NGNFS:
+; Il log registra il task che manda ogni pacchetto ("da '...'").
+; Dopo il Dismount, osserva se compare il requester "inserire NFS0".
+; Risultati: NGNFS:build/os4-poll-out.txt e NGNFS:build/os4-poll.log
+FailAt 21
+Set O NGNFS:build/os4-poll-out.txt
+Set ML NGNFS:test/os4/NFS0
+If EXISTS NGNFS:test/os4/local/NFS0
+  Set ML NGNFS:test/os4/local/NFS0
+EndIf
+Delete NGNFS:build/os4-func.log QUIET >NIL: *>NIL:
+Echo "== mount" >$O
+Mount $ML >>$O *>>$O
+List NAS: QUICK >>$O *>>$O
+Echo "== 15 s di attesa (interrogazioni periodiche nel log)" >>$O
+Wait 15
+Echo "== Dismount" >>$O
+Dismount NFS0: >>$O *>>$O
+Echo "rc=$RC" >>$O
+Copy NGNFS:build/os4-func.log NGNFS:build/os4-poll.log QUIET >NIL: *>NIL:
+Echo "== FINE (ora osserva i requester per 20-30 s)" >>$O

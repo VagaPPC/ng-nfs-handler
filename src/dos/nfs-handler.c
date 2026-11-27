@@ -96,6 +96,7 @@ struct NFile {
     struct NFile      *next;
     char              *path;
     struct nfsfh      *fh;
+    struct FileHandle *pubfh;       /* FileHandle del DOS (ACTION_COLLECT) */
     BOOL               dirty;       /* scritto e non ancora committato */
     BOOL               modified;    /* scritto dall'apertura (per i notify) */
     int                oflags;      /* per riaprire dopo una riconnessione */
@@ -187,6 +188,7 @@ static void cb_rpc_stats(struct rpc_context *rpc, struct rpc_pdu_stats *d, void 
 }
 
 static LONG                notify_msgs;     /* NotifyMessage non ancora restituiti */
+static LONG                active_reqs;     /* richieste asincrone in corso */
 static void notify_touch(const char *path);
 
 static BOOL                devnode_seen = TRUE;
@@ -273,15 +275,23 @@ static void log_packet(struct DosPacket *pkt)
     }
     name[0] = 0;
     if (b) bstr2c(b, name, sizeof(name));
-    plog("<- %4ld a1=%08lx(%s) a2=%08lx a3=%08lx name=\"%s\"",
-         (long)pkt->dp_Type, (unsigned long)pkt->dp_Arg1,
-         (pkt->dp_Type != ACTION_READ && pkt->dp_Type != ACTION_SEEK &&
-          pkt->dp_Type != ACTION_END && pkt->dp_Arg1 &&
-          (pkt->dp_Type == ACTION_LOCATE_OBJECT || pkt->dp_Type == ACTION_PARENT ||
-           pkt->dp_Type == ACTION_COPY_DIR || pkt->dp_Type == ACTION_EXAMINE_OBJECT ||
-           pkt->dp_Type == ACTION_EXAMINE_NEXT || pkt->dp_Type == ACTION_FREE_LOCK))
-         ? ((struct NLock *)BADDR(pkt->dp_Arg1))->path : "-",
-         (unsigned long)pkt->dp_Arg2, (unsigned long)pkt->dp_Arg3, name);
+    {
+        /* chi manda il pacchetto (porta di risposta -> task) */
+        const char *who = "?";
+        struct MsgPort *rp = pkt->dp_Port;
+        if (rp && (rp->mp_Flags & PF_ACTION) == PA_SIGNAL && rp->mp_SigTask &&
+            ((struct Task *)rp->mp_SigTask)->tc_Node.ln_Name)
+            who = ((struct Task *)rp->mp_SigTask)->tc_Node.ln_Name;
+        plog("<- %4ld a1=%08lx(%s) a2=%08lx a3=%08lx name=\"%s\" da '%.30s'",
+             (long)pkt->dp_Type, (unsigned long)pkt->dp_Arg1,
+             (pkt->dp_Type != ACTION_READ && pkt->dp_Type != ACTION_SEEK &&
+              pkt->dp_Type != ACTION_END && pkt->dp_Arg1 &&
+              (pkt->dp_Type == ACTION_LOCATE_OBJECT || pkt->dp_Type == ACTION_PARENT ||
+               pkt->dp_Type == ACTION_COPY_DIR || pkt->dp_Type == ACTION_EXAMINE_OBJECT ||
+               pkt->dp_Type == ACTION_EXAMINE_NEXT || pkt->dp_Type == ACTION_FREE_LOCK))
+             ? ((struct NLock *)BADDR(pkt->dp_Arg1))->path : "-",
+             (unsigned long)pkt->dp_Arg2, (unsigned long)pkt->dp_Arg3, name, who);
+    }
 }
 
 /* errno (negativo da libnfs) -> codice errore DOS */
@@ -464,7 +474,7 @@ static char *parent_path(const char *path)
 static struct NLock *new_lock(char *path, const struct nfs_stat_64 *st, LONG access,
                               struct DosPacket *pkt)
 {
-    struct NLock *l = AllocVec(sizeof(*l), MEMF_PUBLIC | MEMF_CLEAR);
+    struct NLock *l = plat_lock_alloc(sizeof(*l));
     if (!l) { free(path); return NULL; }
     if (pkt && pkt->dp_Port && pkt->dp_Port->mp_SigTask &&
         ((struct Task *)pkt->dp_Port->mp_SigTask)->tc_Node.ln_Name) {
@@ -491,7 +501,7 @@ static void free_lock(struct NLock *l)
         if (*pp == l) { *pp = l->next; break; }
     if (l->dir) nfs_closedir(nfs, l->dir);
     free(l->path);
-    FreeVec(l);
+    plat_lock_free(l);
     numlocks--;
 }
 
@@ -666,6 +676,7 @@ static struct Req *new_req(struct DosPacket *pkt)
     struct Req *r = calloc(1, sizeof(*r));
     if (!r) { reply(pkt, DOSFALSE, ERROR_NO_FREE_STORE); return NULL; }
     r->pkt = pkt;
+    active_reqs++;
     if (opt_log && eclock_freq) { r->m_rpc0 = rpc_calls; r->m_t0 = plat_eclock_read(); }
     return r;
 }
@@ -687,6 +698,7 @@ static void end_req(struct Req *r, LONG res1, LONG res2)
     free(r->ci_cand);
     free(r->path);
     free(r);
+    active_reqs--;
 }
 
 /* ------------------------------------------------------------------------ */
@@ -1180,6 +1192,7 @@ static void cb_open(int err, struct nfs_context *n, void *data, void *priv)
     if (r->oflags & O_CREAT) { nc_note(f->path, TRUE); notify_touch(f->path); }
     f->next = files; files = f; numfiles++;
     r->fh->fh_Arg1 = (LONG)f;
+    f->pubfh = r->fh;
     if (r->freelock) free_lock(LOCK(r->freelock));
     end_req(r, DOSTRUE, 0);
 }
@@ -2300,6 +2313,9 @@ static void rem_volume(void)
     UnLockDosList(LDF_VOLUMES | LDF_WRITE);
     FreeDosEntry(volnode);
     volnode = NULL;
+    /* "disco tolto": senza l'evento il Workbench tiene l'icona di NAS e
+     * continua a cercarla (requester "inserire il volume NAS") */
+    plat_disk_event(FALSE);
 }
 
 static void check_orphan(void)
@@ -2376,6 +2392,89 @@ static BOOL parse_startup(LONG st)
 }
 
 /* ------------------------------------------------------------------------ */
+/* Smontaggio con oggetti aperti (OS4: ACTION_SHUTDOWN + ACTION_COLLECT)     */
+/* ------------------------------------------------------------------------ */
+
+/* Si possono cedere gli oggetti adesso? No con richieste in corso o in
+ * attesa del mount (le callback userebbero oggetti ceduti), con file
+ * scritti e non ancora committati, o con notifiche non restituite. */
+static const char *shutdown_blocker(void)
+{
+    struct NFile *f;
+    if (active_reqs) return "richieste in corso";
+    if (pending.lh_Head->ln_Succ) return "pacchetti in attesa del mount";
+    if (notify_msgs) return "notifiche non restituite";
+    for (f = files; f; f = f->next) if (f->dirty) return "file scritti e non committati";
+    return NULL;
+}
+
+/* Cede notify, file handle e lock al lockhandler del DOS (dos.dospackets:
+ * ACTION_SHUTDOWN). Un oggetto ceduto non e' piu' nostro: si liberano solo i
+ * dati interni, MAI la struttura pubblica. Un oggetto rifiutato (es. un
+ * NotifyRequest non allocato con AllocDosObject) resta all'handler.
+ * Ritorna il numero di oggetti rifiutati (0 = si puo' uscire). */
+static LONG shutdown_collect(void)
+{
+    LONG kept = 0;
+    {
+        struct NNotify **pp = &notifies, *n;
+        while ((n = *pp)) {
+            if (plat_collect(PLAT_COLLECT_NOTIFY, n->nr)) {
+                *pp = n->next;
+                numnotifies--;
+                n->removed = TRUE;
+                notify_free_if_done(n);
+            } else {
+                plog("!! COLLECT notify rifiutato: %s", n->path);
+                kept++;
+                pp = &n->next;
+            }
+        }
+    }
+    /* un rifiuto ferma la cessione: meglio restare montati con file e lock
+     * ancora nostri che a meta' (es. la directory corrente di una Shell) */
+    if (kept) return kept;
+    {
+        struct NFile **pp = &files, *f;
+        while ((f = *pp)) {
+            if (f->pubfh && plat_collect(PLAT_COLLECT_FILEHANDLE, f->pubfh)) {
+                *pp = f->next;
+                numfiles--;
+                if (f->fh && nfs) nfs_close_async(nfs, f->fh, cb_ignore, NULL);
+                free(f->path);
+                free(f);
+            } else {
+                plog("!! COLLECT file rifiutato: %s", f->path);
+                kept++;
+                pp = &f->next;
+            }
+        }
+    }
+    if (kept) return kept;
+    {
+        struct NLock **pp = &locks, *l;
+        while ((l = *pp)) {
+            /* dopo la cessione la struttura e' del lockhandler (che la
+             * libera all'UnLock): prima si salvano i dati interni */
+            struct NLock  *next = l->next;
+            struct nfsdir *dir  = l->dir;
+            char          *path = l->path;
+            if (plat_collect(PLAT_COLLECT_LOCK, &l->fl)) {
+                *pp = next;
+                numlocks--;
+                if (dir && nfs) nfs_closedir(nfs, dir);
+                free(path);
+            } else {
+                plog("!! COLLECT lock rifiutato: %s", path);
+                kept++;
+                pp = &l->next;
+            }
+        }
+    }
+    return kept;
+}
+
+/* ------------------------------------------------------------------------ */
 /* Loop principale (il punto d'ingresso sta in src/platform/<os>/)           */
 /* ------------------------------------------------------------------------ */
 
@@ -2443,6 +2542,7 @@ void handler_main(const struct HandlerStartup *hs)
      * mountlist l'handler non perde la CPU fino a qui. */
     {
         BOOL vol_ok = add_volume();
+        if (vol_ok) plat_disk_event(TRUE);
         gmt_offset_secs = plat_gmt_offset();
         plog("==== %s avviato ====", HANDLER_VERSION);
         plog("   device=%s volume=%s server=%s export=%s uid=%ld gid=%ld rsize=%ld",
@@ -2534,7 +2634,23 @@ void handler_main(const struct HandlerStartup *hs)
         while (running && (msg = GetMsg(pktport))) {
             pkt = (struct DosPacket *)msg->mn_Node.ln_Name;
             if (pkt->dp_Type == ACTION_DIE || pkt->dp_Type == ACTION_SHUTDOWN) {
-                if (numlocks || numfiles || numnotifies || notify_msgs) {
+                BOOL busy = numlocks || numfiles || numnotifies || notify_msgs;
+                plog("<- %4ld %s (locks=%ld files=%ld notify=%ld)", (long)pkt->dp_Type,
+                     pkt->dp_Type == ACTION_DIE ? "ACTION_DIE" : "ACTION_SHUTDOWN",
+                     numlocks, numfiles, numnotifies);
+                /* OS4: con ACTION_SHUTDOWN gli oggetti aperti passano al
+                 * lockhandler del DOS e lo smontaggio riesce lo stesso */
+                if (busy && pkt->dp_Type == ACTION_SHUTDOWN && plat_collect_ok()) {
+                    const char *why = shutdown_blocker();
+                    if (why) {
+                        plog("   SHUTDOWN rimandato: %s", why);
+                    } else {
+                        LONG kept = shutdown_collect();
+                        plog("   COLLECT: oggetti ceduti, rifiutati=%ld", kept);
+                        busy = kept > 0;
+                    }
+                }
+                if (busy) {
                     struct NLock *l;
                     struct NFile *f;
                     plog("   %s rifiutato: locks=%ld files=%ld",

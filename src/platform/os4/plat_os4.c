@@ -286,6 +286,46 @@ ssize_t amiga_writev(int fd, const struct iovec *iov, int iovcnt)
     return total;
 }
 
+/* -------------------------------------------- disco inserito/tolto -- */
+
+void plat_disk_event(BOOL inserted)
+{
+    IDOS->NonBlockingModifyDosEntry(NULL, inserted ? NBM_DISKINSERTED : NBM_DISKREMOVED,
+                                    NULL, NULL);
+}
+
+/* ------------------------------------------- lock e ACTION_COLLECT -- */
+
+void *plat_lock_alloc(ULONG size)
+{
+    UBYTE *l = IDOS->AllocDosObjectTags(DOS_LOCK, ADO_Size, size, TAG_END);
+    /* AllocDosObject prepara la parte pubblica (fl_DOSType,
+     * fl_StructSize...): si azzera solo la parte privata che segue */
+    if (l && size > sizeof(struct Lock))
+        memset(l + sizeof(struct Lock), 0, size - sizeof(struct Lock));
+    return l;
+}
+
+void plat_lock_free(void *lock)
+{
+    IDOS->FreeDosObject(DOS_LOCK, lock);
+}
+
+BOOL plat_collect_ok(void) { return TRUE; }
+
+BOOL plat_collect(LONG type, APTR object)
+{
+    struct MsgPort *port;
+    static const int32 ids[] = { 0, ID_COLLECT_LOCK, ID_COLLECT_FILEHANDLE,
+                                 ID_COLLECT_NOTIFICATION };
+    if (type < 1 || type > 3 || !object) return FALSE;
+    IExec->Forbid();
+    port = IExec->FindPort("dos_lock_handler_port");
+    IExec->Permit();
+    if (!port) return FALSE;
+    return IDOS->DoPkt(port, ACTION_COLLECT, ids[type], (int32)object, 0, 0, 0) != 0;
+}
+
 /* ------------------------------------------------------- piattaforma -- */
 
 LONG plat_gmt_offset(void)

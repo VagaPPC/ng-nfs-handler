@@ -1,0 +1,62 @@
+; Dismount con oggetti aperti su NAS: (OS4, ACTION_SHUTDOWN + ACTION_COLLECT)
+; Richiede Assign NGNFS:
+;   A. lock aperto (CD NAS:): Dismount deve RIUSCIRE, il lock passa al
+;      lockhandler del DOS e CD RAM: lo libera senza problemi
+;   B. rimontaggio dopo lo smontaggio
+;   C. file aperto (Run Execute holdfile.script: "Wait 15 >NAS:busy-run.txt"):
+;      Dismount deve RIUSCIRE (con "Run <file" o "Run >file" OS4 chiude
+;      subito il file: la redirezione vale solo per Run)
+;   D. notify di NotifyTest: OS4 accetta anche il suo NotifyRequest,
+;      Dismount deve RIUSCIRE e la fine di NotifyTest non deve fare danni
+; Dopo ogni smontaggio il Workbench riceve "disco tolto": nessun requester
+; "inserire il volume NAS" deve comparire.
+; Risultati: NGNFS:build/os4-busy-out.txt e NGNFS:build/os4-busy.log
+FailAt 21
+Set O NGNFS:build/os4-busy-out.txt
+Set ML NGNFS:test/os4/NFS0
+If EXISTS NGNFS:test/os4/local/NFS0
+  Set ML NGNFS:test/os4/local/NFS0
+EndIf
+Delete NGNFS:build/os4-func.log QUIET >NIL: *>NIL:
+Echo "== mount" >$O
+Mount $ML >>$O *>>$O
+Wait 2
+List NAS: QUICK >NIL: *>NIL:
+
+Echo "== A. CD NAS: + Dismount (deve riuscire)" >>$O
+CD NAS:
+Dismount NFS0: >>$O *>>$O
+Echo "rc=$RC" >>$O
+Echo "-- CD e List sulla directory ceduta (errore atteso, niente crash)" >>$O
+CD >>$O *>>$O
+List >>$O *>>$O
+CD RAM:
+Echo "-- CD RAM: fatto (UnLock servito dal lockhandler)" >>$O
+
+Echo "== B. rimontaggio (Dismount toglie il device: si rimonta e basta;" >>$O
+Echo "   un controllo con List NFS0: farebbe comparire il requester)" >>$O
+Mount $ML >>$O *>>$O
+Wait 2
+List NAS: QUICK >>$O *>>$O
+Echo "rc=$RC" >>$O
+
+Echo "== C. file aperto + Dismount (deve riuscire)" >>$O
+Run >NIL: Execute NGNFS:test/os4/holdfile.script
+Wait 3
+Dismount NFS0: >>$O *>>$O
+Echo "rc=$RC" >>$O
+Echo "-- attendo la chiusura del file (ACTION_END al lockhandler)" >>$O
+Wait 15
+Mount $ML >>$O *>>$O
+Wait 2
+
+Echo "== D. notify di NotifyTest + Dismount (deve riuscire)" >>$O
+Delete NAS:busy-run.txt QUIET >>$O *>>$O
+Run >NIL: NGNFS:build/os3/NotifyTest NAS:Readme.txt SECS 15
+Wait 3
+Dismount NFS0: >>$O *>>$O
+Echo "rc=$RC" >>$O
+Echo "-- attendo la fine di NotifyTest (EndNotify al lockhandler)" >>$O
+Wait 15
+Copy NGNFS:build/os4-func.log NGNFS:build/os4-busy.log QUIET >NIL: *>NIL:
+Echo "== FINE" >>$O

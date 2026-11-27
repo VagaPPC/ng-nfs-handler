@@ -11,8 +11,11 @@
 
 #include <exec/types.h>
 #include <exec/execbase.h>
+#include <exec/memory.h>
 #include <dos/dosextens.h>
 #include <devices/timer.h>
+#include <devices/input.h>
+#include <devices/inputevent.h>
 #include <libraries/locale.h>
 #include <proto/exec.h>
 #include <proto/dos.h>
@@ -99,4 +102,40 @@ int plat_wait(int fd, int events, ULONG *sigs)
         if (FD_ISSET(fd, &wfds)) revents |= POLLOUT;
     }
     return revents;
+}
+
+/* OS3: nessun lockhandler; ACTION_DIE con oggetti aperti viene rifiutato */
+void *plat_lock_alloc(ULONG size)
+{
+    return AllocVec(size, MEMF_PUBLIC | MEMF_CLEAR);
+}
+
+void plat_lock_free(void *lock)
+{
+    FreeVec(lock);
+}
+
+BOOL plat_collect_ok(void) { return FALSE; }
+BOOL plat_collect(LONG type, APTR object) { return FALSE; }
+
+/* OS3: l'evento si scrive su input.device (IND_WRITEEVENT) */
+void plat_disk_event(BOOL inserted)
+{
+    struct MsgPort  *mp = CreateMsgPort();
+    struct IOStdReq *io = mp ? (struct IOStdReq *)CreateIORequest(mp, sizeof(*io)) : NULL;
+    struct InputEvent ie;
+    UBYTE *p;
+    ULONG i;
+
+    if (io && OpenDevice((CONST_STRPTR)"input.device", 0, (struct IORequest *)io, 0) == 0) {
+        for (p = (UBYTE *)&ie, i = 0; i < sizeof(ie); i++) p[i] = 0;
+        ie.ie_Class   = inserted ? IECLASS_DISKINSERTED : IECLASS_DISKREMOVED;
+        io->io_Command = IND_WRITEEVENT;
+        io->io_Data    = &ie;
+        io->io_Length  = sizeof(ie);
+        DoIO((struct IORequest *)io);
+        CloseDevice((struct IORequest *)io);
+    }
+    if (io) DeleteIORequest((struct IORequest *)io);
+    if (mp) DeleteMsgPort(mp);
 }
