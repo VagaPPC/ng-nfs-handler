@@ -1,11 +1,11 @@
-/* NG-nfs-handler example mountlist.
+/* NG-nfs-handler example mountlist (AmigaOS 4, needs clib4.library).
  * Edit SERVER, EXPORT, VOLUME, UID and GID, then copy this file to
  * DEVS:DOSDrivers/ (mount at boot) or SYS:Storage/DOSDrivers/ ("Mount NFS0:").
  * The Startup string MUST stay inside double quotes.
  * All options: see Docs/nfs-handler.txt
  */
 Handler   = L:nfs-handler
-StackSize = 32768
+StackSize = 65536
 Priority  = 5
 GlobVec   = -1
 Activate  = 1
