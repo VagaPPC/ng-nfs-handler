@@ -123,6 +123,21 @@ OS4/ example mountlist already does).
   LOG=file           write a debug log (every DOS packet, NFS calls and
                      timings). Use RAM:, not a network volume. Slow!
 
+The same options can be given as tooltypes in the icon of the mountlist
+(<device>.info, e.g. NFS0.info). The icon is looked for in DEVS:DOSDrivers/
+and then in SYS:Storage/DOSDrivers/. An option present in the icon wins over
+the Startup string; a switch is turned on with "READONLY" or "READONLY=YES".
+Tooltypes in parentheses and the Mount keywords (ACTIVATE, STACKSIZE...) are
+ignored, and an icon with invalid values is ignored as a whole (see the log).
+SERVER and EXPORT usually stay in the Startup string.
+
+Known issue (AmigaOS 4.1): if an icon <device>.info is in
+SYS:Storage/DOSDrivers/ and you Dismount the device while the mount is still
+in progress (unreachable server, before the TIMEOUT expires), the Workbench
+can crash a few seconds later. Unmounting a volume that is mounted and in
+use works. It happens even if the handler never reads the icon: it is
+enough that the icon is there.
+
 
 5. Server setup (Linux)
 -----------------------

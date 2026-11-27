@@ -1,0 +1,28 @@
+; Opzioni dai tooltype dell'icona (os3). Richiede Assign NGNFS:
+; Copia TI1/TI2 (+ .info) in SYS:Storage/DOSDrivers/, monta, controlla il
+; volume e il log, smonta e cancella le copie. Nessun accesso alla rete.
+;   TI1  VOLUME=TTICON CASE=SENSITIVE TIMEOUT=3 READONLY, (UID=1) spento
+;   TI2  UID=abc: tooltype non validi, valgono quelli della Startup
+; Risultati: NGNFS:build/os3-ti-out.txt, NGNFS:build/os3-ti1.log e -ti2.log
+FailAt 21
+Set O NGNFS:build/os3-ti-out.txt
+Delete NGNFS:build/os3-ti#?.log QUIET >NIL:
+Echo "== copia in SYS:Storage/DOSDrivers" >$O
+Copy NGNFS:test/tooltype/os3/TI#? SYS:Storage/DOSDrivers/ QUIET >>$O
+Echo "== mount TI1" >>$O
+Mount SYS:Storage/DOSDrivers/TI1 >>$O
+Echo "rc=$RC" >>$O
+Echo "== mount TI2" >>$O
+Mount SYS:Storage/DOSDrivers/TI2 >>$O
+Echo "rc=$RC" >>$O
+Wait 3
+Echo "== volumi" >>$O
+Assign VOLS >>$O
+Echo "== smontaggio" >>$O
+NGNFS:build/os3/NFSDismount TI1: >>$O
+Echo "rc=$RC" >>$O
+NGNFS:build/os3/NFSDismount TI2: >>$O
+Echo "rc=$RC" >>$O
+Echo "== pulizia" >>$O
+Delete SYS:Storage/DOSDrivers/TI#? QUIET >>$O
+Echo "== FINE" >>$O

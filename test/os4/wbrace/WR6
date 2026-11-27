@@ -1,0 +1,8 @@
+/* Prova Workbench/Dismount (AmigaOS 4.1): server irraggiungibile, il
+   mount resta in corso finche' non scade TIMEOUT. Richiede Assign NGNFS: */
+Handler   = NGNFS:build/os4/nfs-handler
+StackSize = 65536
+Priority  = 5
+GlobVec   = -1
+Activate  = 1
+Startup   = "SERVER=192.168.1.100 EXPORT=/export/amiga VOLUME=WRV6 TIMEOUT=5 LOG=NGNFS:build/os4-wbrace.log"

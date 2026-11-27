@@ -1,0 +1,21 @@
+; Isolamento del crash del Workbench (AmigaOS 4.1): DUE handler montati e
+; smontati insieme, senza icone ne' tooltype (WR1 e WR2, server irraggiungibile).
+; Se qui il Workbench va in crash dopo ~1 minuto, la causa e' la concorrenza
+; tra due handler che escono insieme, non i tooltype. NON toccare il Workbench.
+; Dopo un riavvio pulito. Richiede Assign NGNFS:
+; Risultati: NGNFS:build/os4-dual-out.txt e NGNFS:build/os4-wbrace.log
+FailAt 21
+Set O NGNFS:build/os4-dual-out.txt
+Delete NGNFS:build/os4-wbrace.log QUIET >NIL: *>NIL:
+Echo "== mount WR1 e WR2" >$O
+Date >>$O
+Mount NGNFS:test/os4/wbrace/WR1 >>$O *>>$O
+Mount NGNFS:test/os4/wbrace/WR2 >>$O *>>$O
+Wait 3
+Dismount WR1: >>$O *>>$O
+Dismount WR2: >>$O *>>$O
+Echo "== smontati, attesa 2 minuti" >>$O
+Date >>$O
+Wait 120
+Echo "== FINE senza crash" >>$O
+Date >>$O

@@ -57,6 +57,15 @@ int plat_wait(int fd, int events, ULONG *sigs);
  * le icone. */
 void plat_disk_event(BOOL inserted);
 
+/* Nodo del volume nella DosList. OS3: LockDosList + AddDosEntry/RemDosEntry
+ * + FreeDosEntry. OS4: NonBlockingModifyDosEntry (NBM_ADDDOSENTRY,
+ * NBM_REMFREEDOSENTRY), come chiede dos.doc per handler e filesystem: niente
+ * lock della DosList dal processo dell'handler, e il nodo lo libera il DOS
+ * quando nessuno lo usa piu' (il Workbench segue la DosList). */
+struct DosList;
+BOOL plat_volume_add(struct DosList *vol);
+void plat_volume_remove(struct DosList *vol);
+
 /* Lock pubblici dell'handler (struct NLock, con la FileLock in testa).
  * OS4: allocati con AllocDosObject(DOS_LOCK), condizione perche' il
  * lockhandler del DOS li accetti con ACTION_COLLECT. Memoria azzerata. */

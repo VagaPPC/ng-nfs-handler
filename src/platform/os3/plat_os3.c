@@ -146,3 +146,22 @@ void plat_disk_event(BOOL inserted)
     if (io) DeleteIORequest((struct IORequest *)io);
     if (mp) DeleteMsgPort(mp);
 }
+
+/* ------------------------------------------------ volume nella DosList -- */
+
+BOOL plat_volume_add(struct DosList *vol)
+{
+    BOOL ok;
+    LockDosList(LDF_VOLUMES | LDF_WRITE);
+    ok = AddDosEntry(vol) != 0;
+    UnLockDosList(LDF_VOLUMES | LDF_WRITE);
+    return ok;
+}
+
+void plat_volume_remove(struct DosList *vol)
+{
+    LockDosList(LDF_VOLUMES | LDF_WRITE);
+    RemDosEntry(vol);
+    UnLockDosList(LDF_VOLUMES | LDF_WRITE);
+    FreeDosEntry(vol);
+}

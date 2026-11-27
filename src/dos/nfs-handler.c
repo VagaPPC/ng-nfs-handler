@@ -2583,24 +2583,25 @@ static BOOL add_volume(void)
     volnode->dol_Task = pktport;
     DateStamp(&volnode->dol_misc.dol_volume.dol_VolumeDate);
     volnode->dol_misc.dol_volume.dol_DiskType = ID_DOS_DISK;
-    LockDosList(LDF_VOLUMES | LDF_WRITE);
-    if (!AddDosEntry(volnode)) {
-        UnLockDosList(LDF_VOLUMES | LDF_WRITE);
+    if (!plat_volume_add(volnode)) {
         FreeDosEntry(volnode);
         volnode = NULL;
         return FALSE;
     }
-    UnLockDosList(LDF_VOLUMES | LDF_WRITE);
     return TRUE;
 }
 
 static void rem_volume(void)
 {
     if (!volnode) return;
-    LockDosList(LDF_VOLUMES | LDF_WRITE);
-    RemDosEntry(volnode);
-    UnLockDosList(LDF_VOLUMES | LDF_WRITE);
-    FreeDosEntry(volnode);
+    /* Prima di toglierlo il volume non deve piu' puntare alla porta. Su OS4
+     * NBM_REMFREEDOSENTRY, se la DosList e' occupata (il Workbench la scorre
+     * a ogni cambiamento), rimanda la rimozione a dos_nbmd_process: il nodo
+     * resterebbe nella lista con dol_Task = porta gia' cancellata, e chi
+     * cerca il volume farebbe PutMsg su memoria liberata. Con NULL il DOS lo
+     * vede solo come "non inserito". */
+    volnode->dol_Task = NULL;
+    plat_volume_remove(volnode);
     volnode = NULL;
     /* "disco tolto": senza l'evento il Workbench tiene l'icona di NAS e
      * continua a cercarla (requester "inserire il volume NAS") */
@@ -2626,15 +2627,201 @@ static void check_orphan(void)
 
 static char *dupstr(const char *s) { return s ? strdup(s) : NULL; }
 
-static BOOL parse_startup(LONG st)
+/* Opzioni della riga Startup. Le stesse si possono dare come tooltype
+ * nell'icona della mountlist: un tooltype attivo prevale sulla Startup. */
+#define OPT_TEMPLATE "SERVER/A,EXPORT/A,VOLUME/K,UID/K/N,GID/K/N," \
+                     "TIMEOUT/K/N,RSIZE/K/N,CHARSET/K,LOG/K,CASE/K," \
+                     "WSIZE/K/N,SYNC/K,UMASK/K,READONLY/S,PAR/K/N,NOTIFYPOLL/K/N"
+#define OPT_COUNT    16
+
+static const char *icon_path;          /* icona letta (per il log) */
+static char        icon_args[512];     /* opzioni prese dall'icona */
+static BOOL        icon_bad;           /* tooltype non validi, ignorati */
+
+static int upc(int c) { return (c >= 'a' && c <= 'z') ? c - 32 : c; }
+
+static BOOL streqi(const char *a, const char *b)
 {
-    char src[512];
+    while (*a && upc((UBYTE)*a) == upc((UBYTE)*b)) a++, b++;
+    return upc((UBYTE)*a) == upc((UBYTE)*b);     /* vero solo se finite insieme */
+}
+
+/* Cerca la chiave key[0..klen) nel template. Ritorna 0 se non e' un'opzione
+ * dell'handler, 'S' per uno switch, 'K' per le altre. */
+static int opt_kind(const char *key, ULONG klen)
+{
+    const char *t = OPT_TEMPLATE;
+    while (*t) {
+        const char *name = t;
+        ULONG n = 0, i;
+        int kind = 'K';
+        while (name[n] && name[n] != '/' && name[n] != ',') n++;
+        for (t = name + n; *t && *t != ','; t++)
+            if (t[0] == '/' && t[1] == 'S') kind = 'S';
+        if (*t == ',') t++;
+        if (n != klen) continue;
+        for (i = 0; i < n && upc((UBYTE)key[i]) == upc((UBYTE)name[i]); i++) ;
+        if (i == n) return kind;
+    }
+    return 0;
+}
+
+/* Tooltype (righe separate da '\n') -> riga per ReadArgs con le sole
+ * opzioni dell'handler: le parole chiave di Mount (ACTIVATE, STACKSIZE...)
+ * e le altre si ignorano. Virgolette solo per i valori con spazi. */
+static void icon_to_args(const char *tts, char *out, ULONG size)
+{
+    ULONG pos = 0;
+    out[0] = 0;
+    while (*tts) {
+        const char *line = tts, *eq;
+        ULONG len = 0, klen;
+        int kind;
+        while (line[len] && line[len] != '\n') len++;
+        tts = line + len + (line[len] ? 1 : 0);
+        for (klen = 0; klen < len && line[klen] != '=' && line[klen] != ' '; klen++) ;
+        if (!(kind = opt_kind(line, klen))) continue;
+        eq = (klen < len && line[klen] == '=') ? line + klen + 1 : NULL;
+        if (kind == 'S') {
+            /* switch: "READONLY" o "READONLY=YES"; "=NO" lo lascia spento */
+            if (eq && (upc((UBYTE)*eq) == 'N' || *eq == '0')) continue;
+            if (pos + klen + 2 >= size) break;
+            memcpy(out + pos, line, klen);
+            pos += klen;
+        } else {
+            ULONG i, vlen = len - (eq ? (ULONG)(eq - line) : len);
+            BOOL  quote = FALSE;
+            if (!eq) continue;                  /* opzione senza valore */
+            if (pos + klen + vlen + 5 >= size) break;
+            for (i = 0; i < vlen; i++) if (eq[i] == ' ') quote = TRUE;
+            memcpy(out + pos, line, klen);
+            pos += klen;
+            out[pos++] = '=';
+            if (quote) out[pos++] = '"';
+            for (i = 0; i < vlen; i++) if (eq[i] != '"') out[pos++] = eq[i];
+            if (quote) out[pos++] = '"';
+        }
+        out[pos++] = ' ';
+        out[pos] = 0;
+    }
+}
+
+/* --- Tooltype dell'icona della mountlist --------------------------------
+ * Il file .info si legge direttamente con il DOS, senza icon.library: su
+ * OS4 GetDiskObject() chiamata dal processo dell'handler faceva andare in
+ * crash il Workbench un minuto dopo. Formato: struct DiskObject (78 byte),
+ * DrawerData (56), Image normale e selezionata (20 + dati), DefaultTool,
+ * ToolTypes (vedi anche tools/icontool.py). Interi big-endian come la CPU. */
+
+static ULONG be16(const UBYTE *p) { return ((ULONG)p[0] << 8) | p[1]; }
+static ULONG be32(const UBYTE *p)
+{
+    return ((ULONG)p[0] << 24) | ((ULONG)p[1] << 16) | ((ULONG)p[2] << 8) | p[3];
+}
+
+static BOOL fread_all(BPTR fh, void *buf, LONG n) { return Read(fh, buf, n) == n; }
+static BOOL fskip(BPTR fh, LONG n) { return n <= 0 || Seek(fh, n, OFFSET_CURRENT) != -1; }
+
+static BOOL skip_image(BPTR fh)
+{
+    UBYTE im[20];
+    if (!fread_all(fh, im, 20)) return FALSE;
+    if (!be32(im + 10)) return TRUE;                     /* ImageData == NULL */
+    return fskip(fh, (LONG)(((be16(im + 4) + 15) >> 4) * 2 * be16(im + 6) * be16(im + 8)));
+}
+
+/* Tooltype attivi (non vuoti, non tra parentesi) di <path>.info in buf,
+ * separati da '\n'. FALSE se l'icona non c'e' o non si legge. */
+static BOOL read_icon_tooltypes(const char *path, char *buf, ULONG size)
+{
+    char  name[140], line[256];
+    UBYTE h[78], w[4];
+    BPTR  fh;
+    ULONG n = 0, count, i, len;
+    BOOL  ok = FALSE;
+
+    buf[0] = 0;
+    snprintf(name, sizeof(name), "%s.info", path);
+    if (!(fh = Open((STRPTR)name, MODE_OLDFILE))) return FALSE;
+    if (!fread_all(fh, h, 78) || be16(h) != 0xE310 || be16(h + 2) != 1) goto out;
+    if (be32(h + 66) && !fskip(fh, 56)) goto out;                     /* DrawerData */
+    if (be32(h + 22) && !skip_image(fh)) goto out;                    /* GadgetRender */
+    if (be32(h + 26) && (be16(h + 16) & 0x0002) && !skip_image(fh)) goto out;
+    if (be32(h + 50)) {                                               /* DefaultTool */
+        if (!fread_all(fh, w, 4) || !fskip(fh, (LONG)be32(w))) goto out;
+    }
+    ok = TRUE;
+    if (!be32(h + 54)) goto out;                                      /* niente tooltype */
+    if (!fread_all(fh, w, 4)) goto out;
+    count = be32(w) / 4;
+    for (i = 1; i < count && i < 256; i++) {
+        if (!fread_all(fh, w, 4) || (len = be32(w)) > 4096) break;
+        if (len > sizeof(line)) {                    /* troppo lunga (NewIcons) */
+            if (!fskip(fh, (LONG)len)) break;
+            continue;
+        }
+        if (!fread_all(fh, line, (LONG)len)) break;
+        line[len ? len - 1 : 0] = 0;
+        len = strlen(line);
+        if (!len || line[0] == '(' || n + len + 2 > size) continue;
+        memcpy(buf + n, line, len);
+        n += len;
+        buf[n++] = '\n';
+        buf[n] = 0;
+    }
+out:
+    Close(fh);
+    return ok;
+}
+
+/* Cerca <device>.info in DEVS:DOSDrivers/ e poi in SYS:Storage/DOSDrivers/.
+ * Ritorna il percorso (senza .info) o NULL. */
+static const char *find_icon_tooltypes(const char *dev, char *buf, ULONG size)
+{
+    static const char *const dirs[] = { "DEVS:DOSDrivers/", "SYS:Storage/DOSDrivers/" };
+    static char path[128];
+    ULONG i;
+    for (i = 0; i < 2; i++) {
+        snprintf(path, sizeof(path), "%s%s", dirs[i], dev);
+        if (read_icon_tooltypes(path, buf, size)) return path;
+    }
+    buf[0] = 0;
+    return NULL;
+}
+
+/* ReadArgs di una riga (terminata con '\n' come vuole ReadArgs) */
+static struct RDArgs *read_args(const char *tmpl, char *src, ULONG len, LONG *a)
+{
+    struct RDArgs *rda = AllocDosObject(DOS_RDARGS, NULL);
+    if (!rda) return NULL;
+    rda->RDA_Source.CS_Buffer = (UBYTE *)src;
+    rda->RDA_Source.CS_Length = len;
+    rda->RDA_Source.CS_CurChr = 0;
+    rda->RDA_Flags |= RDAF_NOPROMPT;
+    if (!ReadArgs((STRPTR)tmpl, a, rda)) {
+        FreeDosObject(DOS_RDARGS, rda);
+        return NULL;
+    }
+    return rda;
+}
+
+static void free_args(struct RDArgs *rda)
+{
+    if (!rda) return;
+    FreeArgs(rda);
+    FreeDosObject(DOS_RDARGS, rda);
+}
+
+static BOOL parse_startup(LONG st, const char *tooltypes)
+{
+    char src[512], isrc[520], itmpl[sizeof(OPT_TEMPLATE)];
     ULONG i, j;
-    struct RDArgs *rda;
-    LONG a[16];
+    struct RDArgs *rda, *irda = NULL;
+    LONG a[OPT_COUNT], b[OPT_COUNT];
     BOOL ok = FALSE;
 
     memset(a, 0, sizeof(a));
+    memset(b, 0, sizeof(b));
     if (!(st > 1024 && TypeOfMem(BADDR(st)))) return FALSE;
     bstr2c((BSTR)st, src, sizeof(src) - 2);
     for (i = j = 0; src[i]; i++)
@@ -2642,41 +2829,57 @@ static BOOL parse_startup(LONG st)
     src[j++] = '\n';
     src[j] = 0;
 
-    rda = AllocDosObject(DOS_RDARGS, NULL);
-    if (!rda) return FALSE;
-    rda->RDA_Source.CS_Buffer = (UBYTE *)src;
-    rda->RDA_Source.CS_Length = j;
-    rda->RDA_Source.CS_CurChr = 0;
-    rda->RDA_Flags |= RDAF_NOPROMPT;
-    if (ReadArgs((STRPTR)"SERVER/A,EXPORT/A,VOLUME/K,UID/K/N,GID/K/N,"
-                 "TIMEOUT/K/N,RSIZE/K/N,CHARSET/K,LOG/K,CASE/K,"
-                 "WSIZE/K/N,SYNC/K,UMASK/K,READONLY/S,PAR/K/N,NOTIFYPOLL/K/N", a, rda)) {
-        opt_server = dupstr((char *)a[0]);
-        opt_export = dupstr((char *)a[1]);
-        opt_volume = dupstr(a[2] ? (char *)a[2] : devname);
-        if (a[3]) opt_uid     = *(LONG *)a[3];
-        if (a[4]) opt_gid     = *(LONG *)a[4];
-        if (a[5]) opt_timeout = *(LONG *)a[5];
-        if (a[6]) opt_rsize   = *(LONG *)a[6];
-        if (a[7] && !strcmp((char *)a[7], "RAW")) opt_raw_charset = TRUE;
-        opt_log = dupstr((char *)a[8]);
-        if (a[9] && !strcmp((char *)a[9], "SENSITIVE")) opt_case_sensitive = TRUE;
-        if (a[10]) opt_wsize = *(LONG *)a[10];
-        if (a[11] && !strcmp((char *)a[11], "YES")) opt_sync = TRUE;
-        if (a[12]) opt_umask = strtol((char *)a[12], NULL, 8) & 0777;
-        if (a[13]) opt_readonly = TRUE;
-        if (opt_wsize < 1024) opt_wsize = 1024;
-        if (a[14]) opt_par = *(LONG *)a[14];
-        if (opt_par < 1) opt_par = 1;
-        if (opt_par > 16) opt_par = 16;
-        if (a[15]) opt_notifypoll = *(LONG *)a[15];
-        if (opt_notifypoll < 0) opt_notifypoll = 0;
-        if (opt_rsize < 1024) opt_rsize = 1024;
-        if (opt_timeout < 1)  opt_timeout = 1;
-        ok = opt_server && opt_export && opt_volume;
-        FreeArgs(rda);
+    if (!(rda = read_args(OPT_TEMPLATE, src, j, a))) return FALSE;
+
+    /* tooltype: stesso template senza /A (SERVER ed EXPORT stanno di
+     * solito nella Startup); ogni opzione presente prevale */
+    if (tooltypes && *tooltypes) {
+        icon_to_args(tooltypes, icon_args, sizeof(icon_args) - 2);
+        if (icon_args[0]) {
+            const char *t;
+            char *d = itmpl;
+            for (t = OPT_TEMPLATE; *t; t++) {
+                if (t[0] == '/' && t[1] == 'A') { t++; continue; }
+                *d++ = *t;
+            }
+            *d = 0;
+            j = strlen(icon_args);
+            memcpy(isrc, icon_args, j);
+            isrc[j++] = '\n';
+            isrc[j] = 0;
+            if ((irda = read_args(itmpl, isrc, j, b))) {
+                for (i = 0; i < OPT_COUNT; i++) if (b[i]) a[i] = b[i];
+            } else {
+                icon_bad = TRUE;
+            }
+        }
     }
-    FreeDosObject(DOS_RDARGS, rda);
+
+    opt_server = dupstr((char *)a[0]);
+    opt_export = dupstr((char *)a[1]);
+    opt_volume = dupstr(a[2] ? (char *)a[2] : devname);
+    if (a[3]) opt_uid     = *(LONG *)a[3];
+    if (a[4]) opt_gid     = *(LONG *)a[4];
+    if (a[5]) opt_timeout = *(LONG *)a[5];
+    if (a[6]) opt_rsize   = *(LONG *)a[6];
+    if (a[7]) opt_raw_charset = streqi((char *)a[7], "RAW");
+    opt_log = dupstr((char *)a[8]);
+    if (a[9]) opt_case_sensitive = streqi((char *)a[9], "SENSITIVE");
+    if (a[10]) opt_wsize = *(LONG *)a[10];
+    if (a[11]) opt_sync = streqi((char *)a[11], "YES");
+    if (a[12]) opt_umask = strtol((char *)a[12], NULL, 8) & 0777;
+    if (a[13]) opt_readonly = TRUE;
+    if (opt_wsize < 1024) opt_wsize = 1024;
+    if (a[14]) opt_par = *(LONG *)a[14];
+    if (opt_par < 1) opt_par = 1;
+    if (opt_par > 16) opt_par = 16;
+    if (a[15]) opt_notifypoll = *(LONG *)a[15];
+    if (opt_notifypoll < 0) opt_notifypoll = 0;
+    if (opt_rsize < 1024) opt_rsize = 1024;
+    if (opt_timeout < 1)  opt_timeout = 1;
+    ok = opt_server && opt_export && opt_volume;
+    free_args(irda);
+    free_args(rda);
     return ok;
 }
 
@@ -2774,6 +2977,7 @@ void handler_main(const struct HandlerStartup *hs)
     struct MsgPort   *tport = NULL;
     timereq_t *treq = NULL;
     BOOL  timer_ok = FALSE, timer_pending = FALSE, running = TRUE;
+    BOOL  startup_failed = FALSE;
     ULONG spins = 0;
     char *c;
 
@@ -2800,8 +3004,19 @@ void handler_main(const struct HandlerStartup *hs)
     for (c = devname; *c; c++) if (*c == ':') *c = 0;
     if (!devname[0] && devnode) bstr2c(devnode->dn_Name, devname, sizeof(devname));
 
-    if (mini_init() || !devnode || (!pktport && !(pktport = CreateMsgPort())) ||
-        !parse_startup((LONG)devnode->dn_Startup)) {
+    /* Tooltype dell'icona prima di creare il volume (il nome puo' venire da
+     * li'). OS3: anche prima di rispondere a Mount. OS4: la piattaforma ha
+     * gia' risposto, ma il volume non esiste ancora. */
+    {
+        static char tts[512];
+        if (mini_init() || !devnode || (!pktport && !(pktport = CreateMsgPort())))
+            startup_failed = TRUE;
+        else {
+            if (devname[0]) icon_path = find_icon_tooltypes(devname, tts, sizeof(tts));
+            if (!parse_startup((LONG)devnode->dn_Startup, tts)) startup_failed = TRUE;
+        }
+    }
+    if (startup_failed) {
         if (pkt) {
             if (pktport) DeleteMsgPort(pktport);
             ReplyPkt(pkt, DOSFALSE, ERROR_BAD_TEMPLATE);
@@ -2837,6 +3052,18 @@ void handler_main(const struct HandlerStartup *hs)
         plog("   device=%s volume=%s server=%s export=%s uid=%ld gid=%ld rsize=%ld",
              devname, opt_volume, opt_server, opt_export, opt_uid, opt_gid, opt_rsize);
         if (!vol_ok) plog("!! impossibile creare il volume %s", opt_volume);
+        plog("   timeout=%ld case=%s charset=%s sync=%s readonly=%s notifypoll=%ld par=%ld umask=%03lo",
+             opt_timeout, opt_case_sensitive ? "SENSITIVE" : "INSENSITIVE",
+             opt_raw_charset ? "RAW" : "LATIN1", opt_sync ? "YES" : "NO",
+             opt_readonly ? "si" : "no", opt_notifypoll, opt_par, (unsigned long)opt_umask);
+        /* per confrontare con i registri di un eventuale crash di un client */
+        plog("   indirizzi: processo=%08lx porta=%08lx devnode=%08lx volnode=%08lx",
+             (unsigned long)me, (unsigned long)pktport, (unsigned long)devnode,
+             (unsigned long)volnode);
+        if (icon_path)
+            plog("   icona %s.info: %s", icon_path,
+                 icon_bad ? "tooltype non validi, ignorati" :
+                 icon_args[0] ? icon_args : "nessuna opzione dell'handler");
     }
 
     notify_port = CreateMsgPort();

@@ -1,0 +1,59 @@
+; Prova a: Dismount mentre il Workbench aspetta ancora la risposta al LOCATE
+; Sei device (WR1..WR6) con server irraggiungibile (TIMEOUT=5: il mount si
+; arrende dopo 6-8 s). Il Workbench vede ogni volume nuovo e manda LOCATE;
+; Dismount arriva dopo 2 s. Tra un device e l'altro 20 s di calma, poi
+; 2 minuti di attesa finale per i crash ritardati. NON toccare il Workbench.
+; Dopo un riavvio pulito. Richiede Assign NGNFS:
+; Risultati: NGNFS:build/os4-wbrace-a-out.txt e NGNFS:build/os4-wbrace-a.log
+FailAt 21
+Set O NGNFS:build/os4-wbrace-a-out.txt
+Delete NGNFS:build/os4-wbrace.log NGNFS:build/os4-wbrace-a.log QUIET >NIL: *>NIL:
+Echo "== prova a (Dismount dopo 2 s)" >$O
+Date >>$O
+Echo "-- WR1" >>$O
+Mount NGNFS:test/os4/wbrace/WR1 >>$O *>>$O
+Wait 2
+Dismount WR1: >>$O *>>$O
+Echo "rc=$RC" >>$O
+Date >>$O
+Wait 20
+Echo "-- WR2" >>$O
+Mount NGNFS:test/os4/wbrace/WR2 >>$O *>>$O
+Wait 2
+Dismount WR2: >>$O *>>$O
+Echo "rc=$RC" >>$O
+Date >>$O
+Wait 20
+Echo "-- WR3" >>$O
+Mount NGNFS:test/os4/wbrace/WR3 >>$O *>>$O
+Wait 2
+Dismount WR3: >>$O *>>$O
+Echo "rc=$RC" >>$O
+Date >>$O
+Wait 20
+Echo "-- WR4" >>$O
+Mount NGNFS:test/os4/wbrace/WR4 >>$O *>>$O
+Wait 2
+Dismount WR4: >>$O *>>$O
+Echo "rc=$RC" >>$O
+Date >>$O
+Wait 20
+Echo "-- WR5" >>$O
+Mount NGNFS:test/os4/wbrace/WR5 >>$O *>>$O
+Wait 2
+Dismount WR5: >>$O *>>$O
+Echo "rc=$RC" >>$O
+Date >>$O
+Wait 20
+Echo "-- WR6" >>$O
+Mount NGNFS:test/os4/wbrace/WR6 >>$O *>>$O
+Wait 2
+Dismount WR6: >>$O *>>$O
+Echo "rc=$RC" >>$O
+Date >>$O
+Wait 20
+Rename NGNFS:build/os4-wbrace.log NGNFS:build/os4-wbrace-a.log >>$O *>>$O
+Echo "== attesa finale 2 minuti" >>$O
+Wait 120
+Echo "== FINE senza crash" >>$O
+Date >>$O

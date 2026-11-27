@@ -125,6 +125,21 @@ di esempio in OS4/ lo fa già).
   LOG=file           scrive un log di diagnosi (ogni pacchetto DOS, chiamate
                      NFS, tempi). Usa RAM:, non un volume di rete. Lento!
 
+Le stesse opzioni si possono dare come tooltype nell'icona della mountlist
+(<device>.info, ad es. NFS0.info). L'icona si cerca in DEVS:DOSDrivers/ e
+poi in SYS:Storage/DOSDrivers/. Un'opzione presente nell'icona prevale sulla
+stringa Startup; uno switch si attiva con "READONLY" o "READONLY=YES". I
+tooltype tra parentesi e le parole chiave di Mount (ACTIVATE, STACKSIZE...)
+si ignorano, e un'icona con valori non validi viene ignorata per intero
+(vedi il log). SERVER ed EXPORT di solito restano nella stringa Startup.
+
+Problema noto (AmigaOS 4.1): se in SYS:Storage/DOSDrivers/ c'è l'icona
+<device>.info e si fa il Dismount del device mentre il mount è ancora in
+corso (server irraggiungibile, prima che scada TIMEOUT), il Workbench può
+andare in crash qualche secondo dopo. Smontare un volume montato e in uso
+funziona. Succede anche se l'handler non legge mai l'icona: basta che l'icona
+ci sia.
+
 
 5. Configurazione del server (Linux)
 ------------------------------------

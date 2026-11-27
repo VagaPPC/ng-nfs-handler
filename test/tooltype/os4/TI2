@@ -1,0 +1,9 @@
+/* Opzioni dai tooltype dell'icona (os4). Lo script la copia in
+   SYS:Storage/DOSDrivers/ (l'handler cerca l'icona solo li' e in
+   DEVS:DOSDrivers/). Richiede Assign NGNFS: */
+Handler   = NGNFS:build/os4/nfs-handler
+StackSize = 65536
+Priority  = 5
+GlobVec   = -1
+Activate  = 0
+Startup   = "SERVER=192.168.1.100 EXPORT=/export/amiga VOLUME=TISTARTUP2 LOG=NGNFS:build/os4-ti2.log"
