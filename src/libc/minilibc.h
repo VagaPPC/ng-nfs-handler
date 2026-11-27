@@ -10,6 +10,12 @@ void  mini_exit(void);          /* distrugge il pool (libera TUTTO) */
 const char *mini_errstr(int e);
 extern void (*mini_assert_hook)(const char *file, int line, const char *expr);
 
+#ifdef __amigaos4__
+/* OS4: la libc e' clib4 (src/platform/os4/plat_os4.c fornisce mini_*) */
+#include <stdlib.h>
+#include <string.h>
+#include <stdio.h>
+#else
 void *malloc(size_t);
 void *calloc(size_t, size_t);
 void *realloc(void *, size_t);
@@ -29,5 +35,6 @@ char *strchr(const char *, int);
 char *strrchr(const char *, int);
 int   vsnprintf(char *, size_t, const char *, va_list);
 int   snprintf(char *, size_t, const char *, ...);
+#endif
 
 #endif

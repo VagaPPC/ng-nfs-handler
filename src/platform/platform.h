@@ -18,9 +18,24 @@
 #include <stdint.h>
 
 /* Nucleo dell'handler: chiamato dal punto d'ingresso della piattaforma
- * quando exec e dos sono pronti. Legge il pacchetto di startup da
- * pr_MsgPort, gira fino ad ACTION_DIE (o handler orfano) e ritorna. */
-void handler_main(void);
+ * quando exec, dos e la libc sono pronti; gira fino ad ACTION_DIE /
+ * ACTION_SHUTDOWN (o handler orfano) e ritorna.
+ *
+ * hs == NULL: il nucleo legge il pacchetto di startup da pr_MsgPort e
+ * risponde dopo aver letto le opzioni (OS3: Mount riceve un errore se la
+ * Startup e' sbagliata).
+ * hs != NULL: la piattaforma ha gia' preso il pacchetto, creato la porta
+ * dei pacchetti, messa in dn_Port e risposto (OS4: va fatto prima di aprire
+ * clib4, altrimenti Mount e l'apertura della libreria si bloccano a
+ * vicenda). Il pacchetto non esiste piu': ne restano solo i dati copiati. */
+struct DeviceNode;
+struct MsgPort;
+struct HandlerStartup {
+    struct DeviceNode *devnode;
+    struct MsgPort    *port;        /* creata con CreateMsgPort() */
+    char               devname[64]; /* da dp_Arg1, senza ':' */
+};
+void handler_main(const struct HandlerStartup *hs);
 
 /* Minuti a ovest di GMT * 60 (da locale.library); 0 se non disponibile. */
 LONG plat_gmt_offset(void);

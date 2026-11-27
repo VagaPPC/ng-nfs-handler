@@ -4,8 +4,11 @@
 #   make PLATFORM=os3 pktlog  -> build/os3/pktlog-handler
 #   make clean
 #
-# Piattaforme previste: os3 | os4 | mos | aros | linux (solo test VFS)
-# Per ora e' implementato solo os3.
+#   make PLATFORM=os4 handler -> build/os4/nfs-handler (clib4)
+#   make PLATFORM=os4 probe   -> build/os4/clib4probe
+#
+# Piattaforme previste: os3 | os4 | mos | aros
+# Implementate: os3, os4.
 
 PLATFORM ?= os3
 BUILD    := build/$(PLATFORM)
@@ -30,16 +33,26 @@ HANDLER_LIBS    := -lgcc
 TOOL_CFLAGS     := -Os $(CPUFLAGS) -noixemul -Wall -Wextra -fomit-frame-pointer
 TOOL_LDFLAGS    := -noixemul \
                    -L$(M68K_PREFIX)/m68k-amigaos/lib -L$(M68K_PREFIX)/m68k-amigaos/libnix/lib
+# libnfs: compat POSIX nostro (bsdsocket + minilibc)
+COMPAT_DIR  := src/net
+COMPAT_SRC  := src/net/amiga_compat.c
+OPTFLAGS    := -Os $(CPUFLAGS) -noixemul -fomit-frame-pointer
+AR          := $(M68K_PREFIX)/bin/m68k-amigaos-ar
 endif
 
 ifeq ($(PLATFORM),os4)
-# adtools ppc-amigaos-gcc. Per ora solo "make PLATFORM=os4 probe" (prova di
-# clib4 dentro un handler); l'handler vero arriva col passo 4.
+# adtools ppc-amigaos-gcc con clib4 (2.x, l'SDK di clib4 in SDK/clib4)
 OS4_GCC := $(firstword $(wildcard /opt/ppc-amigaos/bin/ppc-amigaos-gcc) \
            $(wildcard $(HOME)/toolchains/bin/ppc-amigaos-gcc) ppc-amigaos-gcc)
 OS4_SDK ?= $(firstword $(wildcard /opt/ppc-amigaos/ppc-amigaos/SDK) \
            $(wildcard $(HOME)/toolchains/ppc-amigaos-rootfs/opt/ppc-amigaos/ppc-amigaos/SDK))
 CC      := $(OS4_GCC)
+AR      := $(patsubst %-gcc,%-ar,$(OS4_GCC))
+STRIP   := $(patsubst %-gcc,%-strip,$(OS4_GCC))
+# libnfs: clib4 e' quasi POSIX, il compat sta in src/platform/os4
+COMPAT_DIR := src/platform/os4
+COMPAT_SRC :=
+OPTFLAGS   := -O2 -mcrt=clib4 -D__USE_INLINE__ -Wno-deprecated-declarations
 endif
 ifeq ($(PLATFORM),mos)
 $(error PLATFORM=mos non ancora implementato)
@@ -56,20 +69,20 @@ endif
 LIBNFS_DIRS := lib mount nfs nfs4 portmap nlm nsm rquota
 LIBNFS_SRC  := $(filter-out libnfs/lib/krb5-wrapper.c, \
                $(foreach d,$(LIBNFS_DIRS),$(wildcard libnfs/$(d)/*.c))) \
-               src/net/amiga_compat.c
+               $(COMPAT_SRC)
 LIBNFS_OBJ  := $(patsubst %.c,$(BUILD)/obj/%.o,$(LIBNFS_SRC))
-LIBNFS_INC  := -Isrc/net -Ilibnfs/include -Ilibnfs/include/nfsc \
+LIBNFS_INC  := -I$(COMPAT_DIR) -Ilibnfs/include -Ilibnfs/include/nfsc \
                $(foreach d,mount nfs nfs4 portmap nlm nsm rquota,-Ilibnfs/$(d))
-LIBNFS_CFLAGS := -Os $(CPUFLAGS) -noixemul -fomit-frame-pointer \
-                 -DAROS -DHAVE_CONFIG_H $(LIBNFS_INC) -include src/net/config.h
+LIBNFS_CFLAGS := $(OPTFLAGS) -DAROS -DHAVE_CONFIG_H $(LIBNFS_INC) \
+                 -include $(COMPAT_DIR)/config.h
 
-$(BUILD)/obj/%.o: %.c src/net/aros_compat.h src/net/config.h
+$(BUILD)/obj/%.o: %.c $(COMPAT_DIR)/aros_compat.h $(COMPAT_DIR)/config.h
 	@mkdir -p $(dir $@)
 	$(CC) $(LIBNFS_CFLAGS) -c $< -o $@
 
 $(BUILD)/libnfs.a: $(LIBNFS_OBJ)
 	rm -f $@
-	$(M68K_PREFIX)/bin/m68k-amigaos-ar rcs $@ $^
+	$(AR) rcs $@ $^
 
 all: pktlog nfsdismount nfsls handler notifytest
 
@@ -82,12 +95,19 @@ $(BUILD)/NotifyTest: tools/notifytest/notifytest.c | $(BUILD)
 # Nucleo comune (src/dos/) + strato di piattaforma (src/platform/<os>/).
 # OS3: niente startup code ne' libnix: start.s (entry) + handler + libnfs +
 # minilibc.
+# OS4: plat_os4.o per primo (_start, liste .ctors/.dtors) + clib4 senza crt0
+# + crtend.o per ultimo.
 PLAT_DIR    := src/platform/$(PLATFORM)
 PLAT_INC    := -Isrc/platform -Isrc/libc
+ifeq ($(PLATFORM),os4)
+HANDLER_OBJ := $(BUILD)/obj/$(PLAT_DIR)/plat_$(PLATFORM).o \
+               $(BUILD)/obj/src/dos/nfs-handler.o
+else
 HANDLER_OBJ := $(BUILD)/obj/$(PLAT_DIR)/start.o \
                $(BUILD)/obj/src/dos/nfs-handler.o \
                $(BUILD)/obj/$(PLAT_DIR)/plat_$(PLATFORM).o
-HANDLER_DEPS := src/net/aros_compat.h src/net/config.h src/libc/minilibc.h \
+endif
+HANDLER_DEPS := $(COMPAT_DIR)/aros_compat.h $(COMPAT_DIR)/config.h src/libc/minilibc.h \
                 src/platform/platform.h
 
 $(BUILD)/obj/$(PLAT_DIR)/start.o: $(PLAT_DIR)/start.s
@@ -110,11 +130,17 @@ $(BUILD)/obj/src/libc/minilibc.o: src/libc/minilibc.c src/libc/minilibc.h
 
 handler: $(BUILD)/nfs-handler
 
+ifeq ($(PLATFORM),os4)
+$(BUILD)/nfs-handler: $(HANDLER_OBJ) $(BUILD)/libnfs.a
+	$(CC) -mcrt=clib4 -nostartfiles -o $@ \
+	      $(HANDLER_OBJ) $(BUILD)/libnfs.a $(OS4_SDK)/clib4/lib/crtend.o
+else
 # start.o DEVE essere il primo oggetto
 $(BUILD)/nfs-handler: $(HANDLER_OBJ) $(BUILD)/obj/src/libc/minilibc.o $(BUILD)/libnfs.a
 	$(CC) $(CPUFLAGS) -noixemul -nostartfiles -nostdlib -o $@ \
 	      $(HANDLER_OBJ) $(BUILD)/libnfs.a $(BUILD)/obj/src/libc/minilibc.o -lgcc
 # (minilibc.o anche dopo libnfs.a: risolve i simboli richiesti dalla libreria)
+endif
 
 nfsls: $(BUILD)/nfsls
 

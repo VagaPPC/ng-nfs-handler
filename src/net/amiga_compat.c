@@ -34,6 +34,11 @@ int amiga_socket_init(void)
     return 0;
 }
 
+int amiga_socket_ready(void)
+{
+    return SocketBase != NULL;
+}
+
 void amiga_socket_exit(void)
 {
     if (SocketBase) {

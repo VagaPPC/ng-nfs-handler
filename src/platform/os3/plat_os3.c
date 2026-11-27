@@ -40,7 +40,7 @@ int handler_entry(void)
         GetMsg(&me->pr_MsgPort);
         return 0;
     }
-    handler_main();
+    handler_main(NULL);
     CloseLibrary((struct Library *)DOSBase);
     return 0;
 }

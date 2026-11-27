@@ -1,0 +1,7 @@
+/* Test su AmigaOS 4.1 (clib4). Richiede Assign NGNFS: */
+Handler   = NGNFS:build/os4/nfs-handler
+StackSize = 65536
+Priority  = 5
+GlobVec   = -1
+Activate  = 1
+Startup   = "SERVER=192.168.1.100 EXPORT=/export/amiga VOLUME=NAS UID=1000 GID=1000 LOG=NGNFS:build/os4-func.log"

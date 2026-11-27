@@ -39,11 +39,33 @@
 #include <proto/dos.h>
 #include <stdarg.h>
 #include <stdint.h>
+#include <errno.h>
 #include <nfsc/libnfs.h>
 #include <nfsc/libnfs-raw.h>
 
 #include "minilibc.h"
 #include "platform.h"
+
+#ifdef __amigaos4__
+#include <dos/obsolete.h>       /* dn_Task, dol_Task, fl_Task, ACTION_DIE */
+/* OS4: struct TimeRequest al posto di timerequest (quella vecchia si
+ * scontra con la timeval di clib4); fib_EntryType si chiama fib_Obsolete */
+typedef struct TimeRequest timereq_t;
+#define TR_IO(t)        ((t)->Request)
+#define TR_SECS(t)      ((t)->Time.Seconds)
+#define TR_MICRO(t)     ((t)->Time.Microseconds)
+#define fib_EntryType   fib_Obsolete
+#define LOG_SEEK_END(fh) ChangeFilePosition(fh, 0, OFFSET_END)
+#else
+typedef struct timerequest timereq_t;
+#define TR_IO(t)        ((t)->tr_node)
+#define TR_SECS(t)      ((t)->tr_time.tv_secs)
+#define TR_MICRO(t)     ((t)->tr_time.tv_micro)
+#define LOG_SEEK_END(fh) Seek(fh, 0, OFFSET_END)
+#endif
+#ifndef ACTION_SHUTDOWN
+#define ACTION_SHUTDOWN 3000    /* OS4 (V51+): sostituisce ACTION_DIE */
+#endif
 
 #define HANDLER_VERSION "nfs-handler 0.9 (27.11.2026) beta"
 static const char verstag[] __attribute__((used)) = "$VER: " HANDLER_VERSION;
@@ -203,7 +225,7 @@ static void plog(const char *f, ...)
 
     fh = Open((STRPTR)opt_log, MODE_READWRITE);
     if (!fh) return;
-    Seek(fh, 0, OFFSET_END);
+    LOG_SEEK_END(fh);
     Write(fh, line, n);
     Close(fh);
 }
@@ -1787,6 +1809,14 @@ static void cb_mount(int err, struct nfs_context *n, void *data, void *priv)
     }
     plog("   mount %s:%s OK (readmax=%lu)", opt_server, opt_export,
          (unsigned long)nfs_get_readmax(nfs));
+#ifdef __amigaos4__
+    {
+        int fd = nfs_get_fd(nfs);
+        int fl = fd >= 0 ? fcntl(fd, F_GETFL) : -1;
+        plog("   socket fd=%ld flags=%lx (O_NONBLOCK=%lx: %s)", (long)fd, (long)fl,
+             (long)O_NONBLOCK, fl >= 0 && (fl & O_NONBLOCK) ? "non bloccante" : "BLOCCANTE");
+    }
+#endif
     mstate = MS_READY;
     while ((nd = RemHead(&pending)))
         dispatch((struct DosPacket *)nd->ln_Name);
@@ -1820,6 +1850,11 @@ static BOOL need_mount(struct DosPacket *pkt)
     plog("   mount %s:%s ...", opt_server, opt_export);
     if (nfs_mount_async(nfs, opt_server, opt_export, cb_mount, NULL)) {
         plog("!! nfs_mount_async: %s", nfs_get_error(nfs));
+        /* il contesto puo' restare con un socket mezzo aperto ("Trying to
+         * connect while already connected" ai tentativi successivi):
+         * il prossimo mount riparte da zero */
+        nfs_destroy_context(nfs);
+        nfs = NULL;
         fail_pending(ERROR_NO_DISK);
         return FALSE;
     }
@@ -2326,14 +2361,14 @@ static BOOL parse_startup(LONG st)
 /* Loop principale (il punto d'ingresso sta in src/platform/<os>/)           */
 /* ------------------------------------------------------------------------ */
 
-void handler_main(void)
+void handler_main(const struct HandlerStartup *hs)
 {
     struct Message   *msg;
     struct DosPacket *pkt, *die_pkt = NULL;
     struct MsgPort   *tport = NULL;
-    struct timerequest *treq = NULL;
+    timereq_t *treq = NULL;
     BOOL  timer_ok = FALSE, timer_pending = FALSE, running = TRUE;
-    ULONG tick = 0;
+    ULONG tick = 0, spins = 0;
     char *c;
 
     me = (struct Process *)FindTask(NULL);
@@ -2343,26 +2378,46 @@ void handler_main(void)
     pending.lh_Tail     = NULL;
     pending.lh_TailPred = (struct Node *)&pending.lh_Head;
 
-    WaitPort(&me->pr_MsgPort);
-    msg = GetMsg(&me->pr_MsgPort);
-    pkt = (struct DosPacket *)msg->mn_Node.ln_Name;
-
-    devnode = (struct DeviceNode *)BADDR(pkt->dp_Arg3);
-    bstr2c((BSTR)pkt->dp_Arg1, devname, sizeof(devname));
+    if (hs) {
+        /* la piattaforma ha gia' risposto al pacchetto di startup */
+        pkt     = NULL;
+        devnode = hs->devnode;
+        pktport = hs->port;
+        strncpy(devname, hs->devname, sizeof(devname) - 1);
+    } else {
+        WaitPort(&me->pr_MsgPort);
+        msg = GetMsg(&me->pr_MsgPort);
+        pkt = (struct DosPacket *)msg->mn_Node.ln_Name;
+        devnode = (struct DeviceNode *)BADDR(pkt->dp_Arg3);
+        bstr2c((BSTR)pkt->dp_Arg1, devname, sizeof(devname));
+    }
     for (c = devname; *c; c++) if (*c == ':') *c = 0;
     if (!devname[0] && devnode) bstr2c(devnode->dn_Name, devname, sizeof(devname));
 
-    if (mini_init() || !devnode || !(pktport = CreateMsgPort()) ||
+    if (mini_init() || !devnode || (!pktport && !(pktport = CreateMsgPort())) ||
         !parse_startup((LONG)devnode->dn_Startup)) {
-        if (pktport) DeleteMsgPort(pktport);
-        ReplyPkt(pkt, DOSFALSE, ERROR_BAD_TEMPLATE);
+        if (pkt) {
+            if (pktport) DeleteMsgPort(pktport);
+            ReplyPkt(pkt, DOSFALSE, ERROR_BAD_TEMPLATE);
+        } else if (pktport) {
+            /* gia' montato: staccarsi dal DeviceNode e rifiutare cio' che
+             * e' arrivato nel frattempo */
+            Forbid();
+            if (devnode) devnode->dn_Task = NULL;
+            while ((msg = GetMsg(pktport)))
+                ReplyPkt((struct DosPacket *)msg->mn_Node.ln_Name, DOSFALSE, ERROR_BAD_TEMPLATE);
+            DeleteMsgPort(pktport);
+            Permit();
+        }
         mini_exit();
         return;
     }
     mini_assert_hook = assert_hook;
 
-    devnode->dn_Task = pktport;
-    ReplyPkt(pkt, DOSTRUE, 0);
+    if (pkt) {
+        devnode->dn_Task = pktport;
+        ReplyPkt(pkt, DOSTRUE, 0);
+    }
 
     /* Il volume va creato SUBITO, prima di qualsiasi I/O DOS (log, locale):
      * altrimenti chi ha fatto Mount puo' usare "NAS:" prima che esista e
@@ -2380,13 +2435,13 @@ void handler_main(void)
     notify_port = CreateMsgPort();
 
     if ((tport = CreateMsgPort()) &&
-        (treq = (struct timerequest *)CreateIORequest(tport, sizeof(*treq))) &&
+        (treq = (timereq_t *)CreateIORequest(tport, sizeof(*treq))) &&
         OpenDevice((CONST_STRPTR)TIMERNAME, UNIT_VBLANK, (struct IORequest *)treq, 0) == 0) {
         timer_ok = TRUE;
-        eclock_freq = plat_eclock_open(treq->tr_node.io_Device);
-        treq->tr_node.io_Command = TR_ADDREQUEST;
-        treq->tr_time.tv_secs = HEARTBEAT_SECS;
-        treq->tr_time.tv_micro = 0;
+        eclock_freq = plat_eclock_open(TR_IO(treq).io_Device);
+        TR_IO(treq).io_Command = TR_ADDREQUEST;
+        TR_SECS(treq) = HEARTBEAT_SECS;
+        TR_MICRO(treq) = 0;
         SendIO((struct IORequest *)treq);
         timer_pending = TRUE;
     }
@@ -2396,7 +2451,7 @@ void handler_main(void)
         ULONG tsig   = timer_ok ? 1UL << tport->mp_SigBit : 0;
         ULONG nsig   = notify_port ? 1UL << notify_port->mp_SigBit : 0;
         ULONG sigs   = pktsig | tsig | nsig;
-        int   fd     = (nfs && SocketBase) ? nfs_get_fd(nfs) : -1;
+        int   fd     = (nfs && amiga_socket_ready()) ? nfs_get_fd(nfs) : -1;
         BOOL  lost   = FALSE;
 
         /* montati ma senza socket: libnfs non riesce a riconnettersi da sola
@@ -2407,7 +2462,20 @@ void handler_main(void)
         }
 
         {
-            int revents = plat_wait(fd, fd >= 0 ? nfs_which_events(nfs) : 0, &sigs);
+            int events  = fd >= 0 ? nfs_which_events(nfs) : 0;
+            int revents = plat_wait(fd, events, &sigs);
+            /* Attesa a vuoto (errore o nessun evento e nessun segnale): non
+             * deve succedere. Con Priority=5 un giro a vuoto toglie la CPU a
+             * tutto il sistema: si registra e si cede un tick. */
+            if (revents < 0 || (revents == 0 && sigs == 0)) {
+                if (++spins == 1 || spins % 500 == 0)
+                    plog("!! attesa a vuoto x%lu: rc=%ld errno=%ld fd=%ld events=%lx",
+                         (unsigned long)spins, (long)revents, (long)errno,
+                         (long)fd, (unsigned long)events);
+                if (spins > 20) Delay(1);
+            } else {
+                spins = 0;
+            }
             if (revents > 0 && nfs_service(nfs, revents) < 0) {
                 plog("!! nfs_service: %s", nfs_get_error(nfs));
                 if (mstate == MS_READY) lost = TRUE;
@@ -2433,8 +2501,8 @@ void handler_main(void)
             if (orphan_exit) {
                 running = FALSE;
             } else {
-                treq->tr_time.tv_secs = HEARTBEAT_SECS;
-                treq->tr_time.tv_micro = 0;
+                TR_SECS(treq) = HEARTBEAT_SECS;
+                TR_MICRO(treq) = 0;
                 SendIO((struct IORequest *)treq);
                 timer_pending = TRUE;
             }
@@ -2444,11 +2512,12 @@ void handler_main(void)
 
         while (running && (msg = GetMsg(pktport))) {
             pkt = (struct DosPacket *)msg->mn_Node.ln_Name;
-            if (pkt->dp_Type == ACTION_DIE) {
+            if (pkt->dp_Type == ACTION_DIE || pkt->dp_Type == ACTION_SHUTDOWN) {
                 if (numlocks || numfiles || numnotifies || notify_msgs) {
                     struct NLock *l;
                     struct NFile *f;
-                    plog("   DIE rifiutato: locks=%ld files=%ld", numlocks, numfiles);
+                    plog("   %s rifiutato: locks=%ld files=%ld",
+                         pkt->dp_Type == ACTION_DIE ? "DIE" : "SHUTDOWN", numlocks, numfiles);
                     for (l = locks; l; l = l->next)
                         plog("     lock %08lx %s  da '%s'", (unsigned long)MKBADDR(l),
                              l->path, l->owner);
@@ -2491,7 +2560,8 @@ void handler_main(void)
     if (nfs) { nfs_destroy_context(nfs); nfs = NULL; }
     amiga_socket_exit();
     rem_volume();
-    plog("==== uscita (%s) ====", die_pkt ? "ACTION_DIE" : "orfano");
+    plog("==== uscita (%s) ====", !die_pkt ? "orfano" :
+         die_pkt->dp_Type == ACTION_DIE ? "ACTION_DIE" : "ACTION_SHUTDOWN");
 
     Forbid();
     if (die_pkt) {

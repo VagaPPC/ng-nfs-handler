@@ -29,6 +29,7 @@ extern struct Library *SocketBase;
  * e collega errno/h_errno. Ritorna 0 se ok, -1 se manca lo stack TCP. */
 int  amiga_socket_init(void);
 void amiga_socket_exit(void);
+int  amiga_socket_ready(void);    /* SocketBase aperta? */
 
 /* --- socket API --- */
 #define ioctl        IoctlSocket
