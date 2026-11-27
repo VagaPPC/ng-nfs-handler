@@ -1,0 +1,23 @@
+; File oltre i 2/4 GB su OS4 (pacchetti 64 bit, EXAMINEDATA). Richiede Assign NGNFS:
+; Serve NAS:big/grande.bin (5 GB sparso con marcatori, creato sul server).
+; Risultati: NGNFS:build/os4-big-out.txt e NGNFS:build/os4-big.log
+FailAt 21
+Set O NGNFS:build/os4-big-out.txt
+Set ML NGNFS:test/os4/NFS0
+If EXISTS NGNFS:test/os4/local/NFS0
+  Set ML NGNFS:test/os4/local/NFS0
+EndIf
+Delete NGNFS:build/os4-func.log QUIET >NIL: *>NIL:
+Echo "== mount" >$O
+Mount $ML >>$O *>>$O
+Wait 2
+Echo "== bigtest" >>$O
+NGNFS:build/os4/bigtest NAS:big/grande.bin WFILE=NAS:big/tregiga.bin >>$O *>>$O
+Echo "rc=$RC" >>$O
+Echo "== List NAS:big (cartelle: ancora il ripiego del DOS, tappa 2)" >>$O
+List NAS:big >>$O *>>$O
+Echo "== Dismount" >>$O
+Dismount NFS0: >>$O *>>$O
+Echo "rc=$RC" >>$O
+Copy NGNFS:build/os4-func.log NGNFS:build/os4-big.log QUIET >NIL: *>NIL:
+Echo "== FINE" >>$O

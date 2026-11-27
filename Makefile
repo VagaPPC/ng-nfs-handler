@@ -157,6 +157,12 @@ $(BUILD)/clib4probe: tools/clib4probe/clib4probe.c | $(BUILD)
 	$(CC) -mcrt=clib4 -O2 -Wall -Wextra -Wno-unused-parameter -nostartfiles \
 	      -o $@ $< $(OS4_SDK)/clib4/lib/crtend.o
 
+# OS4: prova dei pacchetti a 64 bit (vedi tools/bigtest/)
+bigtest: $(BUILD)/bigtest
+
+$(BUILD)/bigtest: tools/bigtest/bigtest.c | $(BUILD)
+	$(CC) -O2 -Wall -o $@ $<
+
 pktlog: $(BUILD)/pktlog-handler
 nfsdismount: $(BUILD)/NFSDismount
 
@@ -198,4 +204,4 @@ dist: all
 clean:
 	rm -rf build
 
-.PHONY: probe all pktlog nfsdismount nfsls handler notifytest dist clean
+.PHONY: probe bigtest all pktlog nfsdismount nfsls handler notifytest dist clean

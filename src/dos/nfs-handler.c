@@ -143,6 +143,7 @@ struct Req {
     LONG              eof_at;       /* <0: nessun EOF/short; altrimenti byte validi */
     int               io_err;       /* primo errore (errno negativo) */
     BOOL              is_write;
+    BOOL              is64;         /* risposta DosPacket64 (OS4) */
     /* misure (solo con LOG=) */
     ULONG             m_rpc0;       /* contatore RPC alla partenza */
     uint64_t          m_t0;         /* EClock alla partenza */
@@ -667,6 +668,70 @@ static void fill_info(struct InfoData *id, const struct nfs_statvfs_64 *sv)
     id->id_InUse         = (numlocks || numfiles) ? DOSTRUE : DOSFALSE;
 }
 
+#ifdef __amigaos4__
+/* ------------------------------------------------------------------------ */
+/* Pacchetti nativi OS4 (dos.dospackets.doc)                                */
+/* ------------------------------------------------------------------------ */
+
+/* Risposta a un DosPacket64: Res1 a 64 bit, e dp_Res0 NON va toccato (chi
+ * manda lo usa per capire se l'handler supporta il pacchetto): niente
+ * ReplyPkt(), che scriverebbe Res1 a 32 bit proprio li'. */
+static void reply64(struct DosPacket *pkt, int64_t res1, LONG res2)
+{
+    struct DosPacket64 *p = (struct DosPacket64 *)pkt;
+    struct MsgPort *rp = p->dp_Port;
+    if (opt_log) plog("-> %4ld res1=%lld res2=%ld", (long)p->dp_Type,
+                      (long long)res1, (long)res2);
+    p->dp_Res1 = res1;
+    p->dp_Res2 = res2;
+    p->dp_Port = pktport;
+    PutMsg(rp, p->dp_Link);
+}
+
+/* ExamineData (allocata con AllocDosObject: la libera chi la riceve) dagli
+ * attributi NFS, con le stesse conversioni della FileInfoBlock ma con la
+ * dimensione a 64 bit. */
+static struct ExamineData *make_exd(const char *path, const struct nfs_stat_64 *st)
+{
+    char name[256];
+    const char *base = strrchr(path, '/');
+    BOOL root = !strcmp(path, "/");
+    BOOL dir  = root || stat_type(st) == NF3DIR;
+    struct ExamineData *d;
+
+    if (root) { strncpy(name, opt_volume, sizeof(name) - 1); name[sizeof(name) - 1] = 0; }
+    else utf8_to_amiga(base ? base + 1 : path, name, sizeof(name));
+    d = AllocDosObjectTags(DOS_EXAMINEDATA,
+                           ADO_ExamineData_NameSize, strlen(name) + 1,
+                           ADO_ExamineData_CommentSize, 1, TAG_END);
+    if (!d) return NULL;
+    d->Type       = dir ? FSO_TYPE_DIRECTORY : FSO_TYPE_FILE;
+    d->FileSize   = dir ? -1LL : (int64)st->nfs_size;
+    unix_to_datestamp(st->nfs_mtime, &d->Date);
+    d->RefCount   = 0;                  /* niente hardlink alla Amiga */
+    d->ObjectID   = st->nfs_ino;
+    strcpy(d->Name, name);
+    d->Comment[0] = 0;
+    d->Protection = unix_to_prot((uint32_t)st->nfs_mode);
+    d->OwnerUID   = (uint32)st->nfs_uid;
+    d->OwnerGID   = (uint32)st->nfs_gid;
+    return d;
+}
+
+static void end_req(struct Req *r, LONG res1, LONG res2);
+
+static void cb_examinedata(int err, struct nfs_context *n, void *data, void *priv)
+{
+    struct Req *r = priv;
+    struct ExamineData *d;
+    (void)n;
+    if (err) { end_req(r, 0, map_err(err)); return; }
+    r->lock->st = *(struct nfs_stat_64 *)data;
+    d = make_exd(r->lock->path, &r->lock->st);
+    end_req(r, (LONG)d, d ? 0 : ERROR_NO_FREE_STORE);
+}
+#endif
+
 /* ------------------------------------------------------------------------ */
 /* Richieste asincrone                                                      */
 /* ------------------------------------------------------------------------ */
@@ -689,6 +754,10 @@ static void end_req(struct Req *r, LONG res1, LONG res2)
              (unsigned long)(rpc_calls - r->m_rpc0),
              (unsigned long)((t1 - r->m_t0) * 1000 / eclock_freq));
     }
+#ifdef __amigaos4__
+    if (r->pkt && r->is64) reply64(r->pkt, res2 == 0 ? -1LL : 0LL, res2);
+    else
+#endif
     if (r->pkt) reply(r->pkt, res1, res2);
     free(r->ci_parent);
     free(r->src);
@@ -1590,7 +1659,8 @@ static void cb_truncate(int err, struct nfs_context *n, void *data, void *priv)
     r->file->modified = TRUE;
     if (r->file->pos > r->file->st.nfs_size) r->file->pos = r->file->st.nfs_size;
     r->file->dirty = TRUE;
-    /* pacchetto a 32 bit: size64 e' gia' stato limitato a 0x7FFFFFFF */
+    /* pacchetto a 32 bit: size64 e' gia' stato limitato a 0x7FFFFFFF;
+     * DosPacket64 (is64): end_req risponde -1LL */
     end_req(r, (LONG)r->size64, 0);
 }
 
@@ -2193,6 +2263,93 @@ static void dispatch(struct DosPacket *pkt)
             end_req(r, -1, ERROR_NO_DISK);
         return;
     }
+
+#ifdef __amigaos4__
+    /* --- OS4: Examine a 64 bit e file oltre i 2 GB --- */
+    case ACTION_EXAMINEDATA: {
+        /* dp_Arg1 e' un APTR alla struct Lock, non un BPTR */
+        struct NLock *l = (struct NLock *)pkt->dp_Arg1;
+        struct Req *r;
+        if (!l) { reply(pkt, 0, ERROR_REQUIRED_ARG_MISSING); return; }
+        if (l->dir) { nfs_closedir(nfs, l->dir); l->dir = NULL; }
+        if (!need_mount(pkt)) return;
+        r = new_req(pkt);
+        if (!r) return;
+        r->lock = l;
+        if (nfs_stat64_async(nfs, l->path, cb_examinedata, r))
+            end_req(r, 0, ERROR_NO_DISK);
+        return;
+    }
+
+    case ACTION_EXAMINEDATA_FH: {
+        struct NFile *f = (struct NFile *)pkt->dp_Arg1;
+        struct ExamineData *d;
+        if (!f) { reply(pkt, 0, ERROR_REQUIRED_ARG_MISSING); return; }
+        d = make_exd(f->path, &f->st);
+        reply(pkt, (LONG)d, d ? 0 : ERROR_NO_FREE_STORE);
+        return;
+    }
+
+    case ACTION_CHANGE_FILE_POSITION64: {
+        struct DosPacket64 *p = (struct DosPacket64 *)pkt;
+        struct NFile *f = (struct NFile *)p->dp_Arg1;
+        int64_t newpos;
+        if (!f) { reply64(pkt, 0, ERROR_OBJECT_WRONG_TYPE); return; }
+        switch (p->dp_Arg3) {
+        case OFFSET_BEGINNING: newpos = p->dp_Arg2; break;
+        case OFFSET_CURRENT:   newpos = (int64_t)f->pos + p->dp_Arg2; break;
+        case OFFSET_END:       newpos = (int64_t)f->st.nfs_size + p->dp_Arg2; break;
+        default: reply64(pkt, 0, ERROR_SEEK_ERROR); return;
+        }
+        if (newpos < 0 || newpos > (int64_t)f->st.nfs_size) {
+            reply64(pkt, 0, ERROR_SEEK_ERROR);
+            return;
+        }
+        f->pos = newpos;
+        reply64(pkt, -1LL, 0);
+        return;
+    }
+
+    case ACTION_GET_FILE_POSITION64: {
+        struct NFile *f = (struct NFile *)((struct DosPacket64 *)pkt)->dp_Arg1;
+        if (!f) { reply64(pkt, -1LL, ERROR_OBJECT_WRONG_TYPE); return; }
+        reply64(pkt, (int64_t)f->pos, 0);
+        return;
+    }
+
+    case ACTION_GET_FILE_SIZE64: {
+        struct NFile *f = (struct NFile *)((struct DosPacket64 *)pkt)->dp_Arg1;
+        if (!f) { reply64(pkt, -1LL, ERROR_OBJECT_WRONG_TYPE); return; }
+        reply64(pkt, (int64_t)f->st.nfs_size, 0);
+        return;
+    }
+
+    case ACTION_CHANGE_FILE_SIZE64: {
+        struct DosPacket64 *p = (struct DosPacket64 *)pkt;
+        struct NFile *f = (struct NFile *)p->dp_Arg1;
+        struct Req *r;
+        int64_t ns;
+        if (!f) { reply64(pkt, 0, ERROR_OBJECT_WRONG_TYPE); return; }
+        if (opt_readonly) { reply64(pkt, 0, ERROR_DISK_WRITE_PROTECTED); return; }
+        switch (p->dp_Arg3) {
+        case OFFSET_BEGINNING: ns = p->dp_Arg2; break;
+        case OFFSET_CURRENT:   ns = (int64_t)f->pos + p->dp_Arg2; break;
+        case OFFSET_END:       ns = (int64_t)f->st.nfs_size + p->dp_Arg2; break;
+        default: reply64(pkt, 0, ERROR_SEEK_ERROR); return;
+        }
+        if (ns < 0) { reply64(pkt, 0, ERROR_SEEK_ERROR); return; }
+        if (!need_mount(pkt)) return;
+        if (!ensure_open(pkt, f)) return;
+        r = new_req(pkt);
+        if (!r) return;
+        r->is64   = TRUE;
+        r->file   = f;
+        r->size64 = ns;
+        if (nfs_ftruncate_async(nfs, f->fh, (uint64_t)ns, cb_truncate, r))
+            end_req(r, -1, ERROR_NO_DISK);
+        return;
+    }
+#endif
 
     case ACTION_DELETE_OBJECT:
         if (opt_readonly) { reply(pkt, DOSFALSE, ERROR_DISK_WRITE_PROTECTED); return; }
