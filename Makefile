@@ -33,7 +33,13 @@ TOOL_LDFLAGS    := -noixemul \
 endif
 
 ifeq ($(PLATFORM),os4)
-$(error PLATFORM=os4 non ancora implementato)
+# adtools ppc-amigaos-gcc. Per ora solo "make PLATFORM=os4 probe" (prova di
+# clib4 dentro un handler); l'handler vero arriva col passo 4.
+OS4_GCC := $(firstword $(wildcard /opt/ppc-amigaos/bin/ppc-amigaos-gcc) \
+           $(wildcard $(HOME)/toolchains/bin/ppc-amigaos-gcc) ppc-amigaos-gcc)
+OS4_SDK ?= $(firstword $(wildcard /opt/ppc-amigaos/ppc-amigaos/SDK) \
+           $(wildcard $(HOME)/toolchains/ppc-amigaos-rootfs/opt/ppc-amigaos/ppc-amigaos/SDK))
+CC      := $(OS4_GCC)
 endif
 ifeq ($(PLATFORM),mos)
 $(error PLATFORM=mos non ancora implementato)
@@ -116,6 +122,15 @@ $(BUILD)/nfsls: tools/nfsls/nfsls.c $(BUILD)/libnfs.a
 	$(CC) $(TOOL_CFLAGS) $(LIBNFS_INC) -DAROS -DHAVE_CONFIG_H $(TOOL_LDFLAGS) \
 	      -o $@ $(M68K_PREFIX)/m68k-amigaos/libnix/lib/swapstack.o $< $(BUILD)/libnfs.a
 
+# ------------------------------------------------------------ clib4probe --
+# OS4: handler di prova con clib4 senza crt0 (vedi tools/clib4probe/).
+# crtend.o chiude le liste .ctors/.dtors aperte in clib4probe.c.
+probe: $(BUILD)/clib4probe
+
+$(BUILD)/clib4probe: tools/clib4probe/clib4probe.c | $(BUILD)
+	$(CC) -mcrt=clib4 -O2 -Wall -Wextra -Wno-unused-parameter -nostartfiles \
+	      -o $@ $< $(OS4_SDK)/clib4/lib/crtend.o
+
 pktlog: $(BUILD)/pktlog-handler
 nfsdismount: $(BUILD)/NFSDismount
 
@@ -157,4 +172,4 @@ dist: all
 clean:
 	rm -rf build
 
-.PHONY: all pktlog nfsdismount nfsls handler notifytest dist clean
+.PHONY: probe all pktlog nfsdismount nfsls handler notifytest dist clean

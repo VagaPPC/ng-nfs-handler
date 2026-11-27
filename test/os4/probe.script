@@ -1,0 +1,36 @@
+; Prova di clib4 dentro un handler (passo 3 del port OS4). Richiede Assign NGNFS:
+; Risultati: NGNFS:build/os4-probe-out.txt e NGNFS:build/os4-probe.log
+FailAt 21
+Set O NGNFS:build/os4-probe-out.txt
+Delete NGNFS:build/os4-probe.log QUIET >NIL:
+Echo "== versioni" >$O
+Version >>$O
+Version clib4.library >>$O
+Version bsdsocket.library >>$O
+Echo "== mount" >>$O
+If EXISTS NGNFS:test/os4/local/PROBE
+  Mount NGNFS:test/os4/local/PROBE >>$O
+Else
+  Mount NGNFS:test/os4/PROBE >>$O
+EndIf
+Echo "rc=$RC" >>$O
+Wait 3
+Echo "== pacchetto di prova (Info: errore atteso)" >>$O
+Info PROBE: >>$O
+Wait 2
+Echo "== dismount (Assign DISMOUNT)" >>$O
+Assign PROBE: DISMOUNT >>$O
+Echo "rc=$RC" >>$O
+; l'handler esce da solo dopo 60 s se il dismount non gli manda niente
+Set N 0
+Lab attesa
+Search NGNFS:build/os4-probe.log "clib4probe uscito" QUIET >NIL:
+If WARN
+  If VAL $N LT 70
+    Wait 2
+    Set N `Eval $N + 2`
+    Skip attesa BACK
+  EndIf
+  Echo "handler non uscito dopo 70 s" >>$O
+EndIf
+Echo "== FINE" >>$O

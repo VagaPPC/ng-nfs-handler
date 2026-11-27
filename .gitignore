@@ -9,3 +9,4 @@ build/
 
 # Mountlist di test con i parametri della rete locale
 test/real/local/
+test/os4/local/

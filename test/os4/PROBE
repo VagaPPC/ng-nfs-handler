@@ -1,0 +1,8 @@
+/* Handler di prova clib4 (AmigaOS 4). Richiede Assign NGNFS:
+   SERVER = server NFS (porta 2049) per la prova del socket. */
+Handler   = NGNFS:build/os4/clib4probe
+StackSize = 65536
+Priority  = 5
+GlobVec   = -1
+Activate  = 1
+Startup   = "SERVER=192.168.1.100"
