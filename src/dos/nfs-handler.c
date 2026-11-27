@@ -144,6 +144,8 @@ struct Req {
     int               io_err;       /* primo errore (errno negativo) */
     BOOL              is_write;
     BOOL              is64;         /* risposta DosPacket64 (OS4) */
+    APTR              ctx;          /* EXAMINEDATA_DIR: contesto del DOS */
+    struct nfsdir    *xdir;         /* EXAMINEDATA_DIR: listing in corso */
     /* misure (solo con LOG=) */
     ULONG             m_rpc0;       /* contatore RPC alla partenza */
     uint64_t          m_t0;         /* EClock alla partenza */
@@ -690,32 +692,45 @@ static void reply64(struct DosPacket *pkt, int64_t res1, LONG res2)
 
 /* ExamineData (allocata con AllocDosObject: la libera chi la riceve) dagli
  * attributi NFS, con le stesse conversioni della FileInfoBlock ma con la
- * dimensione a 64 bit. */
+ * dimensione a 64 bit. ctx != NULL: nodo per EXAMINEDATA_DIR (memoria dal
+ * pool del contesto). name e' gia' nel set di caratteri Amiga. */
+static struct ExamineData *make_exd_raw(const char *name, BOOL dir, uint64_t size,
+                                        uint64_t mtime, uint32_t mode, uint32_t uid,
+                                        uint32_t gid, uint64_t ino, APTR ctx)
+{
+    struct ExamineData *d = ctx
+        ? AllocDosObjectTags(DOS_EXAMINEDATA,
+                             ADO_ExamineData_NameSize, strlen(name) + 1,
+                             ADO_ExamineData_CommentSize, 1,
+                             ADO_ExamineDir_Context, ctx, TAG_END)
+        : AllocDosObjectTags(DOS_EXAMINEDATA,
+                             ADO_ExamineData_NameSize, strlen(name) + 1,
+                             ADO_ExamineData_CommentSize, 1, TAG_END);
+    if (!d) return NULL;
+    d->Type       = dir ? FSO_TYPE_DIRECTORY : FSO_TYPE_FILE;
+    d->FileSize   = dir ? -1LL : (int64)size;
+    unix_to_datestamp(mtime, &d->Date);
+    d->RefCount   = 0;                  /* niente hardlink alla Amiga */
+    d->ObjectID   = ino;
+    strcpy(d->Name, name);
+    d->Comment[0] = 0;
+    d->Protection = unix_to_prot(mode);
+    d->OwnerUID   = uid;
+    d->OwnerGID   = gid;
+    return d;
+}
+
 static struct ExamineData *make_exd(const char *path, const struct nfs_stat_64 *st)
 {
     char name[256];
     const char *base = strrchr(path, '/');
     BOOL root = !strcmp(path, "/");
-    BOOL dir  = root || stat_type(st) == NF3DIR;
-    struct ExamineData *d;
 
     if (root) { strncpy(name, opt_volume, sizeof(name) - 1); name[sizeof(name) - 1] = 0; }
     else utf8_to_amiga(base ? base + 1 : path, name, sizeof(name));
-    d = AllocDosObjectTags(DOS_EXAMINEDATA,
-                           ADO_ExamineData_NameSize, strlen(name) + 1,
-                           ADO_ExamineData_CommentSize, 1, TAG_END);
-    if (!d) return NULL;
-    d->Type       = dir ? FSO_TYPE_DIRECTORY : FSO_TYPE_FILE;
-    d->FileSize   = dir ? -1LL : (int64)st->nfs_size;
-    unix_to_datestamp(st->nfs_mtime, &d->Date);
-    d->RefCount   = 0;                  /* niente hardlink alla Amiga */
-    d->ObjectID   = st->nfs_ino;
-    strcpy(d->Name, name);
-    d->Comment[0] = 0;
-    d->Protection = unix_to_prot((uint32_t)st->nfs_mode);
-    d->OwnerUID   = (uint32)st->nfs_uid;
-    d->OwnerGID   = (uint32)st->nfs_gid;
-    return d;
+    return make_exd_raw(name, root || stat_type(st) == NF3DIR, st->nfs_size,
+                        st->nfs_mtime, (uint32_t)st->nfs_mode, (uint32_t)st->nfs_uid,
+                        (uint32_t)st->nfs_gid, st->nfs_ino, NULL);
 }
 
 static void end_req(struct Req *r, LONG res1, LONG res2);
@@ -729,6 +744,96 @@ static void cb_examinedata(int err, struct nfs_context *n, void *data, void *pri
     r->lock->st = *(struct nfs_stat_64 *)data;
     d = make_exd(r->lock->path, &r->lock->st);
     end_req(r, (LONG)d, d ? 0 : ERROR_NO_FREE_STORE);
+}
+
+/* --- EXAMINEDATA_DIR (ExamineDir() nativo) ---
+ * Un solo giro: tutto il listing va nella FreshNodeList, poi FALSE +
+ * ERROR_NO_MORE_ENTRIES (l'unico codice che dice al DOS "scansione finita",
+ * dos.dospackets.doc). FSPrivate[0]: 1 = finita, 2 = errore (in [1]).
+ * I symlink si mostrano col tipo/dimensione del bersaglio, come in
+ * EXAMINE_NEXT (link trasparenti); bersaglio assente = file. */
+#define EXD_CTX(r) ((struct PRIVATE_ExamineDirContext *)(r)->ctx)
+
+static void exd_add(struct Req *r, const char *name_utf8, BOOL dir, uint64_t size,
+                    uint64_t mtime, uint32_t mode, uint32_t uid, uint32_t gid,
+                    uint64_t ino)
+{
+    char name[256];
+    struct ExamineData *d;
+    utf8_to_amiga(name_utf8, name, sizeof(name));
+    d = make_exd_raw(name, dir, size, mtime, mode, uid, gid, ino, r->ctx);
+    if (d) AddTail((struct List *)&EXD_CTX(r)->FreshNodeList, (struct Node *)d);
+    else if (!r->io_err) r->io_err = ERROR_NO_FREE_STORE;
+}
+
+static void exd_fill(struct Req *r);
+
+static void cb_exd_link(int err, struct nfs_context *n, void *data, void *priv)
+{
+    struct Req *r = priv;
+    struct nfsdirent *e = r->ent;
+    (void)n;
+    if (err)
+        exd_add(r, e->name, FALSE, e->size, e->mtime.tv_sec, e->mode, e->uid,
+                e->gid, e->inode);
+    else {
+        struct nfs_stat_64 *st = data;
+        exd_add(r, e->name, stat_type(st) == NF3DIR, st->nfs_size, st->nfs_mtime,
+                (uint32_t)st->nfs_mode, (uint32_t)st->nfs_uid, (uint32_t)st->nfs_gid,
+                st->nfs_ino);
+    }
+    free(r->path); r->path = NULL;
+    exd_fill(r);
+}
+
+static void exd_fill(struct Req *r)
+{
+    struct NLock *l = r->lock;
+    struct nfsdirent *e;
+
+    while (!r->io_err && (e = nfs_readdir(nfs, r->xdir))) {
+        if (!strcmp(e->name, ".") || !strcmp(e->name, "..")) continue;
+        if (e->type == NF3LNK) {
+            int len = strlen(l->path) + strlen(e->name) + 2;
+            r->path = malloc(len);
+            if (r->path) {
+                snprintf(r->path, len, "%s/%s",
+                         strcmp(l->path, "/") ? l->path : "", e->name);
+                r->ent = e;
+                if (!nfs_stat64_async(nfs, r->path, cb_exd_link, r)) return;
+                free(r->path); r->path = NULL;
+            }
+            exd_add(r, e->name, FALSE, e->size, e->mtime.tv_sec, e->mode,
+                    e->uid, e->gid, e->inode);
+            continue;
+        }
+        exd_add(r, e->name, e->type == NF3DIR, e->size, e->mtime.tv_sec, e->mode,
+                e->uid, e->gid, e->inode);
+    }
+    nfs_closedir(nfs, r->xdir);
+    r->xdir = NULL;
+    if (r->io_err) {
+        EXD_CTX(r)->FSPrivate[0] = 2;
+        EXD_CTX(r)->FSPrivate[1] = r->io_err;
+        end_req(r, DOSFALSE, r->io_err);
+    } else {
+        EXD_CTX(r)->FSPrivate[0] = 1;
+        end_req(r, DOSFALSE, ERROR_NO_MORE_ENTRIES);
+    }
+}
+
+static void cb_exd_opendir(int err, struct nfs_context *n, void *data, void *priv)
+{
+    struct Req *r = priv;
+    (void)n;
+    if (err) {
+        EXD_CTX(r)->FSPrivate[0] = 2;
+        EXD_CTX(r)->FSPrivate[1] = map_err(err);
+        end_req(r, DOSFALSE, map_err(err));
+        return;
+    }
+    r->xdir = data;
+    exd_fill(r);
 }
 #endif
 
@@ -2278,6 +2383,33 @@ static void dispatch(struct DosPacket *pkt)
         r->lock = l;
         if (nfs_stat64_async(nfs, l->path, cb_examinedata, r))
             end_req(r, 0, ERROR_NO_DISK);
+        return;
+    }
+
+    case ACTION_EXAMINEDATA_DIR: {
+        struct PRIVATE_ExamineDirContext *ctx =
+            (struct PRIVATE_ExamineDirContext *)pkt->dp_Arg1;
+        struct NLock *l = ctx ? (struct NLock *)ctx->ReferenceLock : NULL;
+        struct Node *nd;
+        struct Req *r;
+        if (!l) { reply(pkt, DOSFALSE, ERROR_REQUIRED_ARG_MISSING); return; }
+        /* scansione gia' finita o fallita: niente altri giri */
+        if (ctx->FSPrivate[0] == 1) { reply(pkt, DOSFALSE, ERROR_NO_MORE_ENTRIES); return; }
+        if (ctx->FSPrivate[0] == 2) { reply(pkt, DOSFALSE, (LONG)ctx->FSPrivate[1]); return; }
+        if (stat_type(&l->st) != NF3DIR) {
+            reply(pkt, DOSFALSE, ERROR_OBJECT_WRONG_TYPE);
+            return;
+        }
+        /* nodi gia' consegnati: si restituiscono al pool del contesto */
+        while ((nd = RemHead((struct List *)&ctx->StaleNodeList)))
+            FreeDosObject(DOS_EXAMINEDATA, nd);
+        if (!need_mount(pkt)) return;
+        r = new_req(pkt);
+        if (!r) return;
+        r->lock = l;
+        r->ctx  = ctx;
+        if (nfs_opendir_async(nfs, l->path, cb_exd_opendir, r))
+            end_req(r, DOSFALSE, ERROR_NO_DISK);
         return;
     }
 

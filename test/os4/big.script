@@ -1,4 +1,5 @@
-; File oltre i 2/4 GB su OS4 (pacchetti 64 bit, EXAMINEDATA). Richiede Assign NGNFS:
+; File oltre i 2/4 GB su OS4 (pacchetti 64 bit, EXAMINEDATA, EXAMINEDATA_DIR).
+; Richiede Assign NGNFS:
 ; Serve NAS:big/grande.bin (5 GB sparso con marcatori, creato sul server).
 ; Risultati: NGNFS:build/os4-big-out.txt e NGNFS:build/os4-big.log
 FailAt 21
@@ -14,8 +15,18 @@ Wait 2
 Echo "== bigtest" >>$O
 NGNFS:build/os4/bigtest NAS:big/grande.bin WFILE=NAS:big/tregiga.bin >>$O *>>$O
 Echo "rc=$RC" >>$O
-Echo "== List NAS:big (cartelle: ancora il ripiego del DOS, tappa 2)" >>$O
+Echo "== List NAS:big (EXAMINEDATA_DIR: deve mostrare 5368709123)" >>$O
 List NAS:big >>$O *>>$O
+Echo "== List NAS: (link_a_dir1 deve restare Dir, nomi Latin-1)" >>$O
+List NAS: >>$O *>>$O
+Echo "== List NAS:link_a_dir1 e NAS:dir1/sub" >>$O
+List NAS:link_a_dir1 >>$O *>>$O
+List NAS:dir1/sub >>$O *>>$O
+Echo "== List con pattern (filtro del DOS)" >>$O
+List NAS:#?.txt >>$O *>>$O
+Echo "== List di una cartella vuota" >>$O
+List NAS:Vuota >>$O *>>$O
+Echo "rc=$RC" >>$O
 Echo "== Dismount" >>$O
 Dismount NFS0: >>$O *>>$O
 Echo "rc=$RC" >>$O
