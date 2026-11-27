@@ -6,3 +6,6 @@ build/
 *.o
 *.a
 *.map
+
+# Mountlist di test con i parametri della rete locale
+test/real/local/

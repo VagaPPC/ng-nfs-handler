@@ -5,7 +5,7 @@
 #   make clean
 #
 # Piattaforme previste: os3 | os4 | mos | aros | linux (solo test VFS)
-# Per ora e' implementato solo os3 (M0).
+# Per ora e' implementato solo os3.
 
 PLATFORM ?= os3
 BUILD    := build/$(PLATFORM)
@@ -73,17 +73,28 @@ $(BUILD)/NotifyTest: tools/notifytest/notifytest.c | $(BUILD)
 	$(CC) $(TOOL_CFLAGS) $(TOOL_LDFLAGS) -s -o $@ $<
 
 # ------------------------------------------------------------- nfs-handler --
-# Niente startup code ne' libnix: start.s (entry) + handler + libnfs + minilibc
-HANDLER_SRC := src/dos/nfs-handler.c src/libc/minilibc.c
-HANDLER_OBJ := $(BUILD)/obj/src/dos/start.o $(BUILD)/obj/src/dos/nfs-handler.o
+# Nucleo comune (src/dos/) + strato di piattaforma (src/platform/<os>/).
+# OS3: niente startup code ne' libnix: start.s (entry) + handler + libnfs +
+# minilibc.
+PLAT_DIR    := src/platform/$(PLATFORM)
+PLAT_INC    := -Isrc/platform -Isrc/libc
+HANDLER_OBJ := $(BUILD)/obj/$(PLAT_DIR)/start.o \
+               $(BUILD)/obj/src/dos/nfs-handler.o \
+               $(BUILD)/obj/$(PLAT_DIR)/plat_$(PLATFORM).o
+HANDLER_DEPS := src/net/aros_compat.h src/net/config.h src/libc/minilibc.h \
+                src/platform/platform.h
 
-$(BUILD)/obj/src/dos/start.o: src/dos/start.s
+$(BUILD)/obj/$(PLAT_DIR)/start.o: $(PLAT_DIR)/start.s
 	@mkdir -p $(dir $@)
 	$(CC) $(CPUFLAGS) -c $< -o $@
 
-$(BUILD)/obj/src/dos/nfs-handler.o: src/dos/nfs-handler.c src/net/aros_compat.h src/net/config.h src/libc/minilibc.h
+$(BUILD)/obj/src/dos/nfs-handler.o: src/dos/nfs-handler.c $(HANDLER_DEPS)
 	@mkdir -p $(dir $@)
-	$(CC) $(LIBNFS_CFLAGS) -Isrc/libc -Wall -Wextra -Wno-unused-parameter -c $< -o $@
+	$(CC) $(LIBNFS_CFLAGS) $(PLAT_INC) -Wall -Wextra -Wno-unused-parameter -c $< -o $@
+
+$(BUILD)/obj/$(PLAT_DIR)/plat_$(PLATFORM).o: $(PLAT_DIR)/plat_$(PLATFORM).c $(HANDLER_DEPS)
+	@mkdir -p $(dir $@)
+	$(CC) $(LIBNFS_CFLAGS) $(PLAT_INC) -Wall -Wextra -Wno-unused-parameter -c $< -o $@
 
 # minilibc: niente builtin/trasformazioni in memset/memcpy (ricorsione!)
 $(BUILD)/obj/src/libc/minilibc.o: src/libc/minilibc.c src/libc/minilibc.h

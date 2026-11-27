@@ -3,7 +3,12 @@ FailAt 21
 Set O NGNFS:build/real-perf-out.txt
 Delete RAM:perf ALL QUIET >NIL:
 MakeDir RAM:perf
-Mount NGNFS:test/real/NFS0P >$O
+; parametri della rete locale in test/real/local/ (non nel repository)
+If EXISTS NGNFS:test/real/local/NFS0P
+  Mount NGNFS:test/real/local/NFS0P >$O
+Else
+  Mount NGNFS:test/real/NFS0P >$O
+EndIf
 Wait 2
 List NAS:perf >NIL:
 Echo "== lettura 5 MB" >>$O

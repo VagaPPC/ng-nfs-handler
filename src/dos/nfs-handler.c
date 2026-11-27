@@ -35,26 +35,18 @@
 #include <dos/rdargs.h>
 #include <dos/notify.h>
 #include <devices/timer.h>
-#include <libraries/locale.h>
 #include <proto/exec.h>
 #include <proto/dos.h>
-#include <proto/locale.h>
 #include <stdarg.h>
 #include <stdint.h>
 #include <nfsc/libnfs.h>
 #include <nfsc/libnfs-raw.h>
-#include <proto/timer.h>
 
 #include "minilibc.h"
+#include "platform.h"
 
 #define HANDLER_VERSION "nfs-handler 0.9 (27.11.2026) beta"
 static const char verstag[] __attribute__((used)) = "$VER: " HANDLER_VERSION;
-
-struct ExecBase   *SysBase;
-struct DosLibrary *DOSBase;
-struct Device     *TimerBase;     /* per ReadEClock (misure con LOG=) */
-
-int handler_entry(void);          /* chiamata da start.s */
 
 /* tipi NFSv3 (libnfs-raw-nfs.h) */
 #define NF3REG 1
@@ -119,6 +111,7 @@ struct Req {
     char             *dst;          /* RENAME: destinazione (percorso DOS risolto) */
     char             *dstname;      /* RENAME: nome richiesto (ultimo componente) */
     LONG              ival;         /* argomento intero (protezione, contatori) */
+    int64_t           size64;       /* SET_FILE_SIZE: nuova dimensione */
     struct DateStamp  ds;           /* SET_DATE */
     BOOL              st_valid;     /* r->st contiene gli attributi di ci_prefix */
     /* I/O parallelo */
@@ -129,7 +122,7 @@ struct Req {
     BOOL              is_write;
     /* misure (solo con LOG=) */
     ULONG             m_rpc0;       /* contatore RPC alla partenza */
-    struct EClockVal  m_t0;
+    uint64_t          m_t0;         /* EClock alla partenza */
 };
 
 enum { OPEN_OLD, OPEN_NEW, OPEN_RW };
@@ -649,21 +642,17 @@ static struct Req *new_req(struct DosPacket *pkt)
     struct Req *r = calloc(1, sizeof(*r));
     if (!r) { reply(pkt, DOSFALSE, ERROR_NO_FREE_STORE); return NULL; }
     r->pkt = pkt;
-    if (opt_log && TimerBase) { r->m_rpc0 = rpc_calls; ReadEClock(&r->m_t0); }
+    if (opt_log && eclock_freq) { r->m_rpc0 = rpc_calls; r->m_t0 = plat_eclock_read(); }
     return r;
 }
 
 static void end_req(struct Req *r, LONG res1, LONG res2)
 {
-    if (opt_log && TimerBase && r->pkt) {
-        struct EClockVal t1;
-        uint64_t a, b;
-        ReadEClock(&t1);
-        a = ((uint64_t)r->m_t0.ev_hi << 32) | r->m_t0.ev_lo;
-        b = ((uint64_t)t1.ev_hi << 32) | t1.ev_lo;
+    if (opt_log && eclock_freq && r->pkt) {
+        uint64_t t1 = plat_eclock_read();
         plog("   %4ld: rpc=%lu t=%lums", (long)r->pkt->dp_Type,
              (unsigned long)(rpc_calls - r->m_rpc0),
-             (unsigned long)((b - a) * 1000 / (eclock_freq ? eclock_freq : 1)));
+             (unsigned long)((t1 - r->m_t0) * 1000 / eclock_freq));
     }
     if (r->pkt) reply(r->pkt, res1, res2);
     free(r->ci_parent);
@@ -1560,11 +1549,12 @@ static void cb_truncate(int err, struct nfs_context *n, void *data, void *priv)
     struct Req *r = priv;
     (void)n; (void)data;
     if (err) { end_req(r, -1, map_err(err)); return; }
-    r->file->st.nfs_size = (uint64_t)r->ival;
+    r->file->st.nfs_size = (uint64_t)r->size64;
     r->file->modified = TRUE;
     if (r->file->pos > r->file->st.nfs_size) r->file->pos = r->file->st.nfs_size;
     r->file->dirty = TRUE;
-    end_req(r, r->ival, 0);
+    /* pacchetto a 32 bit: size64 e' gia' stato limitato a 0x7FFFFFFF */
+    end_req(r, (LONG)r->size64, 0);
 }
 
 /* --- END (Close): close di libnfs fa anche il COMMIT --- */
@@ -2132,7 +2122,7 @@ static void dispatch(struct DosPacket *pkt)
         r = new_req(pkt);
         if (!r) return;
         r->file = f;
-        r->ival = (LONG)ns;
+        r->size64 = ns;
         if (nfs_ftruncate_async(nfs, f->fh, (uint64_t)ns, cb_truncate, r))
             end_req(r, -1, ERROR_NO_DISK);
         return;
@@ -2276,19 +2266,6 @@ static void check_orphan(void)
     if (!found && !numlocks && !numfiles && !numnotifies && !notify_msgs) orphan_exit = TRUE;
 }
 
-static void read_locale(void)
-{
-    struct Library *LocaleBase = OpenLibrary((CONST_STRPTR)"locale.library", 38);
-    if (LocaleBase) {
-        struct Locale *loc = OpenLocale(NULL);
-        if (loc) {
-            gmt_offset_secs = loc->loc_GMTOffset * 60;   /* minuti a ovest di GMT */
-            CloseLocale(loc);
-        }
-        CloseLibrary(LocaleBase);
-    }
-}
-
 static char *dupstr(const char *s) { return s ? strdup(s) : NULL; }
 
 static BOOL parse_startup(LONG st)
@@ -2346,27 +2323,10 @@ static BOOL parse_startup(LONG st)
 }
 
 /* ------------------------------------------------------------------------ */
-/* Entry e loop                                                             */
+/* Loop principale (il punto d'ingresso sta in src/platform/<os>/)           */
 /* ------------------------------------------------------------------------ */
 
-static void handler_main(void);
-
-int handler_entry(void)
-{
-    SysBase = *(struct ExecBase **)4;
-    me = (struct Process *)FindTask(NULL);
-    DOSBase = (struct DosLibrary *)OpenLibrary((CONST_STRPTR)"dos.library", 39);
-    if (!DOSBase) {
-        WaitPort(&me->pr_MsgPort);
-        GetMsg(&me->pr_MsgPort);
-        return 0;
-    }
-    handler_main();
-    CloseLibrary((struct Library *)DOSBase);
-    return 0;
-}
-
-static void handler_main(void)
+void handler_main(void)
 {
     struct Message   *msg;
     struct DosPacket *pkt, *die_pkt = NULL;
@@ -2376,6 +2336,7 @@ static void handler_main(void)
     ULONG tick = 0;
     char *c;
 
+    me = (struct Process *)FindTask(NULL);
     me->pr_WindowPtr = (APTR)-1;
     /* NewList() sta in amiga.lib, che non linkiamo */
     pending.lh_Head     = (struct Node *)&pending.lh_Tail;
@@ -2409,7 +2370,7 @@ static void handler_main(void)
      * mountlist l'handler non perde la CPU fino a qui. */
     {
         BOOL vol_ok = add_volume();
-        read_locale();
+        gmt_offset_secs = plat_gmt_offset();
         plog("==== %s avviato ====", HANDLER_VERSION);
         plog("   device=%s volume=%s server=%s export=%s uid=%ld gid=%ld rsize=%ld",
              devname, opt_volume, opt_server, opt_export, opt_uid, opt_gid, opt_rsize);
@@ -2422,8 +2383,7 @@ static void handler_main(void)
         (treq = (struct timerequest *)CreateIORequest(tport, sizeof(*treq))) &&
         OpenDevice((CONST_STRPTR)TIMERNAME, UNIT_VBLANK, (struct IORequest *)treq, 0) == 0) {
         timer_ok = TRUE;
-        TimerBase = treq->tr_node.io_Device;
-        { struct EClockVal ev; eclock_freq = ReadEClock(&ev); }
+        eclock_freq = plat_eclock_open(treq->tr_node.io_Device);
         treq->tr_node.io_Command = TR_ADDREQUEST;
         treq->tr_time.tv_secs = HEARTBEAT_SECS;
         treq->tr_time.tv_micro = 0;
@@ -2446,25 +2406,12 @@ static void handler_main(void)
             fd = -1;
         }
 
-        if (fd >= 0) {
-            fd_set rfds, wfds;
-            int ev = nfs_which_events(nfs), rc, revents = 0;
-            FD_ZERO(&rfds); FD_ZERO(&wfds);
-            if (ev & POLLIN)  FD_SET(fd, &rfds);
-            if (ev & POLLOUT) FD_SET(fd, &wfds);
-            rc = WaitSelect(fd + 1, &rfds, &wfds, NULL, NULL, &sigs);
-            if (rc > 0) {
-                if (FD_ISSET(fd, &rfds)) revents |= POLLIN;
-                if (FD_ISSET(fd, &wfds)) revents |= POLLOUT;
-            } else if (rc < 0) {
-                sigs = 0;
-            }
-            if (revents && nfs_service(nfs, revents) < 0) {
+        {
+            int revents = plat_wait(fd, fd >= 0 ? nfs_which_events(nfs) : 0, &sigs);
+            if (revents > 0 && nfs_service(nfs, revents) < 0) {
                 plog("!! nfs_service: %s", nfs_get_error(nfs));
                 if (mstate == MS_READY) lost = TRUE;
             }
-        } else {
-            sigs = Wait(sigs);
         }
 
         if (lost) connection_lost("errore sul socket");
@@ -2529,7 +2476,8 @@ static void handler_main(void)
             AbortIO((struct IORequest *)treq);
             WaitIO((struct IORequest *)treq);
         }
-        TimerBase = NULL;
+        plat_eclock_close();
+        eclock_freq = 0;
         CloseDevice((struct IORequest *)treq);
     }
     if (treq)  DeleteIORequest((struct IORequest *)treq);

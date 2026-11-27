@@ -6,7 +6,12 @@ MakeDir RAM:rt
 Echo "== versioni" >$O
 Version >>$O
 Version bsdsocket.library >>$O
-Mount NGNFS:test/real/NFS0 >>$O
+; parametri della rete locale in test/real/local/ (non nel repository)
+If EXISTS NGNFS:test/real/local/NFS0
+  Mount NGNFS:test/real/local/NFS0 >>$O
+Else
+  Mount NGNFS:test/real/NFS0 >>$O
+EndIf
 Wait 2
 Echo "== lettura" >>$O
 Info NAS: >>$O
