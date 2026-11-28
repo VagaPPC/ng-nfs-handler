@@ -57,11 +57,11 @@ int plat_wait(int fd, int events, ULONG *sigs);
  * le icone. */
 void plat_disk_event(BOOL inserted);
 
-/* Nodo del volume nella DosList. OS3: LockDosList + AddDosEntry/RemDosEntry
- * + FreeDosEntry. OS4: NonBlockingModifyDosEntry (NBM_ADDDOSENTRY,
- * NBM_REMFREEDOSENTRY), come chiede dos.doc per handler e filesystem: niente
- * lock della DosList dal processo dell'handler, e il nodo lo libera il DOS
- * quando nessuno lo usa piu' (il Workbench segue la DosList). */
+/* Nodo del volume nella DosList: LockDosList + AddDosEntry/RemDosEntry +
+ * FreeDosEntry, su OS3 e (predefinito) su OS4. Su OS4 con -DOS4_NBM_VOLUME:
+ * NonBlockingModifyDosEntry (NBM_ADDDOSENTRY, NBM_REMFREEDOSENTRY), come
+ * suggerisce dos.doc per gli handler; per ora non e' il predefinito (vedi
+ * plat_os4.c). */
 struct DosList;
 BOOL plat_volume_add(struct DosList *vol);
 void plat_volume_remove(struct DosList *vol);

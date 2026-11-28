@@ -123,20 +123,25 @@ OS4/ example mountlist already does).
   LOG=file           write a debug log (every DOS packet, NFS calls and
                      timings). Use RAM:, not a network volume. Slow!
 
-The same options can be given as tooltypes in the icon of the mountlist
-(<device>.info, e.g. NFS0.info). The icon is looked for in DEVS:DOSDrivers/
-and then in SYS:Storage/DOSDrivers/. An option present in the icon wins over
-the Startup string; a switch is turned on with "READONLY" or "READONLY=YES".
-Tooltypes in parentheses and the Mount keywords (ACTIVATE, STACKSIZE...) are
-ignored, and an icon with invalid values is ignored as a whole (see the log).
-SERVER and EXPORT usually stay in the Startup string.
+AmigaOS 4.1 only: the same options can be given as tooltypes in the icon
+of the mountlist (<device>.info, e.g. NFS0.info). The icon is looked for in
+DEVS:DOSDrivers/ and then in SYS:Storage/DOSDrivers/. An option present in
+the icon wins over the Startup string. A switch is turned on with
+"READONLY" or "READONLY=YES" and turned off with "READONLY=NO" (even if the
+Startup string has READONLY). An option with an empty value ("LOG=") is
+ignored. Tooltypes in parentheses and the Mount keywords (ACTIVATE,
+STACKSIZE...) are ignored, and an icon with invalid values is ignored as a
+whole (see the log). SERVER and EXPORT can be in the Startup string or in
+the icon; the Startup string can even be left out if the icon has
+everything. On AmigaOS 3.x the handler does not read the icon: reading it
+while the handler starts crashed the system, so put the options in the
+Startup string.
 
-Known issue (AmigaOS 4.1): if an icon <device>.info is in
-SYS:Storage/DOSDrivers/ and you Dismount the device while the mount is still
-in progress (unreachable server, before the TIMEOUT expires), the Workbench
-can crash a few seconds later. Unmounting a volume that is mounted and in
-use works. It happens even if the handler never reads the icon: it is
-enough that the icon is there.
+Known issue (AmigaOS 4.1): unmounting with Dismount while the mount is
+still in progress (unreachable server, before TIMEOUT expires) can make the
+Workbench crash a few seconds later. The cause is not known yet; it happens
+more often with an icon <device>.info in SYS:Storage/DOSDrivers/.
+Unmounting a volume that is mounted and in use works.
 
 
 5. Server setup (Linux)

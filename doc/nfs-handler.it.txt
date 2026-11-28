@@ -125,20 +125,25 @@ di esempio in OS4/ lo fa già).
   LOG=file           scrive un log di diagnosi (ogni pacchetto DOS, chiamate
                      NFS, tempi). Usa RAM:, non un volume di rete. Lento!
 
-Le stesse opzioni si possono dare come tooltype nell'icona della mountlist
-(<device>.info, ad es. NFS0.info). L'icona si cerca in DEVS:DOSDrivers/ e
-poi in SYS:Storage/DOSDrivers/. Un'opzione presente nell'icona prevale sulla
-stringa Startup; uno switch si attiva con "READONLY" o "READONLY=YES". I
-tooltype tra parentesi e le parole chiave di Mount (ACTIVATE, STACKSIZE...)
-si ignorano, e un'icona con valori non validi viene ignorata per intero
-(vedi il log). SERVER ed EXPORT di solito restano nella stringa Startup.
+Solo AmigaOS 4.1: le stesse opzioni si possono dare come tooltype
+nell'icona della mountlist (<device>.info, ad es. NFS0.info). L'icona si
+cerca in DEVS:DOSDrivers/ e poi in SYS:Storage/DOSDrivers/. Un'opzione
+presente nell'icona prevale sulla stringa Startup. Uno switch si attiva con
+"READONLY" o "READONLY=YES" e si spegne con "READONLY=NO" (anche se la
+Startup contiene READONLY). Un'opzione con valore vuoto ("LOG=") si ignora.
+I tooltype tra parentesi e le parole chiave di Mount (ACTIVATE,
+STACKSIZE...) si ignorano, e un'icona con valori non validi viene ignorata
+per intero (vedi il log). SERVER ed EXPORT possono stare nella stringa
+Startup o nell'icona; se l'icona contiene tutto, la Startup si può anche
+omettere. Su AmigaOS 3.x l'handler non legge l'icona: leggerla durante
+l'avvio dell'handler mandava in crash il sistema, quindi le opzioni vanno
+nella stringa Startup.
 
-Problema noto (AmigaOS 4.1): se in SYS:Storage/DOSDrivers/ c'è l'icona
-<device>.info e si fa il Dismount del device mentre il mount è ancora in
-corso (server irraggiungibile, prima che scada TIMEOUT), il Workbench può
-andare in crash qualche secondo dopo. Smontare un volume montato e in uso
-funziona. Succede anche se l'handler non legge mai l'icona: basta che l'icona
-ci sia.
+Problema noto (AmigaOS 4.1): smontare con Dismount mentre il mount è ancora
+in corso (server irraggiungibile, prima che scada TIMEOUT) può far andare
+in crash il Workbench qualche secondo dopo. La causa non è ancora nota;
+succede più spesso con l'icona <device>.info in SYS:Storage/DOSDrivers/.
+Smontare un volume montato e in uso funziona.
 
 
 5. Configurazione del server (Linux)

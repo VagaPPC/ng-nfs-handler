@@ -2594,13 +2594,6 @@ static BOOL add_volume(void)
 static void rem_volume(void)
 {
     if (!volnode) return;
-    /* Prima di toglierlo il volume non deve piu' puntare alla porta. Su OS4
-     * NBM_REMFREEDOSENTRY, se la DosList e' occupata (il Workbench la scorre
-     * a ogni cambiamento), rimanda la rimozione a dos_nbmd_process: il nodo
-     * resterebbe nella lista con dol_Task = porta gia' cancellata, e chi
-     * cerca il volume farebbe PutMsg su memoria liberata. Con NULL il DOS lo
-     * vede solo come "non inserito". */
-    volnode->dol_Task = NULL;
     plat_volume_remove(volnode);
     volnode = NULL;
     /* "disco tolto": senza l'evento il Workbench tiene l'icona di NAS e
@@ -2647,10 +2640,12 @@ static BOOL streqi(const char *a, const char *b)
 }
 
 /* Cerca la chiave key[0..klen) nel template. Ritorna 0 se non e' un'opzione
- * dell'handler, 'S' per uno switch, 'K' per le altre. */
-static int opt_kind(const char *key, ULONG klen)
+ * dell'handler, 'S' per uno switch, 'K' per le altre; in *idx la posizione
+ * nel template (indice in a[] di ReadArgs). */
+static int opt_kind(const char *key, ULONG klen, int *idx)
 {
     const char *t = OPT_TEMPLATE;
+    *idx = -1;
     while (*t) {
         const char *name = t;
         ULONG n = 0, i;
@@ -2659,6 +2654,7 @@ static int opt_kind(const char *key, ULONG klen)
         for (t = name + n; *t && *t != ','; t++)
             if (t[0] == '/' && t[1] == 'S') kind = 'S';
         if (*t == ',') t++;
+        ++*idx;
         if (n != klen) continue;
         for (i = 0; i < n && upc((UBYTE)key[i]) == upc((UBYTE)name[i]); i++) ;
         if (i == n) return kind;
@@ -2668,30 +2664,37 @@ static int opt_kind(const char *key, ULONG klen)
 
 /* Tooltype (righe separate da '\n') -> riga per ReadArgs con le sole
  * opzioni dell'handler: le parole chiave di Mount (ACTIVATE, STACKSIZE...)
- * e le altre si ignorano. Virgolette solo per i valori con spazi. */
-static void icon_to_args(const char *tts, char *out, ULONG size)
+ * e le altre si ignorano. Virgolette solo per i valori con spazi. Un valore
+ * vuoto ("LOG=") si ignora. Uno switch con "=NO" o "=0" non va nella riga:
+ * off[indice] = TRUE, e parse_startup lo spegne anche se la Startup lo ha. */
+static void icon_to_args(const char *tts, char *out, ULONG size, BOOL *off)
 {
     ULONG pos = 0;
     out[0] = 0;
     while (*tts) {
         const char *line = tts, *eq;
         ULONG len = 0, klen;
-        int kind;
+        int kind, idx;
         while (line[len] && line[len] != '\n') len++;
         tts = line + len + (line[len] ? 1 : 0);
         for (klen = 0; klen < len && line[klen] != '=' && line[klen] != ' '; klen++) ;
-        if (!(kind = opt_kind(line, klen))) continue;
+        if (!(kind = opt_kind(line, klen, &idx))) continue;
         eq = (klen < len && line[klen] == '=') ? line + klen + 1 : NULL;
         if (kind == 'S') {
-            /* switch: "READONLY" o "READONLY=YES"; "=NO" lo lascia spento */
-            if (eq && (upc((UBYTE)*eq) == 'N' || *eq == '0')) continue;
+            /* switch: "READONLY" o "READONLY=YES" acceso; "=NO" o "=0" spento */
+            if (eq && (upc((UBYTE)*eq) == 'N' || *eq == '0')) {
+                if (idx >= 0 && idx < OPT_COUNT) off[idx] = TRUE;
+                continue;
+            }
             if (pos + klen + 2 >= size) break;
             memcpy(out + pos, line, klen);
             pos += klen;
         } else {
-            ULONG i, vlen = len - (eq ? (ULONG)(eq - line) : len);
+            ULONG i, n = 0, vlen = len - (eq ? (ULONG)(eq - line) : len);
             BOOL  quote = FALSE;
             if (!eq) continue;                  /* opzione senza valore */
+            for (i = 0; i < vlen; i++) if (eq[i] != '"') n++;
+            if (!n) continue;                   /* "LOG=" o 'LOG=""': vuoto */
             if (pos + klen + vlen + 5 >= size) break;
             for (i = 0; i < vlen; i++) if (eq[i] == ' ') quote = TRUE;
             memcpy(out + pos, line, klen);
@@ -2706,7 +2709,13 @@ static void icon_to_args(const char *tts, char *out, ULONG size)
     }
 }
 
-/* --- Tooltype dell'icona della mountlist --------------------------------
+#ifdef __amigaos4__
+/* --- Tooltype dell'icona della mountlist (solo OS4) ----------------------
+ * Su OS3 l'handler non legge l'icona: un Open() dal processo dell'handler
+ * all'avvio (con il nome DEVS:... o relativo alla radice di boot, prima o
+ * dopo la risposta a Mount) mandava in crash il sistema (Guru 80000006 su
+ * Vampire, Amiberry bloccato) mentre Mount non tornava. Su OS4 la lettura
+ * avviene dopo che plat_start ha risposto e non ha dato questi problemi.
  * Il file .info si legge direttamente con il DOS, senza icon.library: su
  * OS4 GetDiskObject() chiamata dal processo dell'handler faceva andare in
  * crash il Workbench un minuto dopo. Formato: struct DiskObject (78 byte),
@@ -2788,6 +2797,7 @@ static const char *find_icon_tooltypes(const char *dev, char *buf, ULONG size)
     buf[0] = 0;
     return NULL;
 }
+#endif /* __amigaos4__ */
 
 /* ReadArgs di una riga (terminata con '\n' come vuole ReadArgs) */
 static struct RDArgs *read_args(const char *tmpl, char *src, ULONG len, LONG *a)
@@ -2816,33 +2826,39 @@ static BOOL parse_startup(LONG st, const char *tooltypes)
 {
     char src[512], isrc[520], itmpl[sizeof(OPT_TEMPLATE)];
     ULONG i, j;
-    struct RDArgs *rda, *irda = NULL;
+    struct RDArgs *rda = NULL, *irda = NULL;
     LONG a[OPT_COUNT], b[OPT_COUNT];
+    BOOL off[OPT_COUNT];
     BOOL ok = FALSE;
+    const char *t;
+    char *d = itmpl;
 
     memset(a, 0, sizeof(a));
     memset(b, 0, sizeof(b));
-    if (!(st > 1024 && TypeOfMem(BADDR(st)))) return FALSE;
-    bstr2c((BSTR)st, src, sizeof(src) - 2);
-    for (i = j = 0; src[i]; i++)
-        if (src[i] != '"' && (UBYTE)src[i] >= ' ') src[j++] = src[i];
-    src[j++] = '\n';
-    src[j] = 0;
+    memset(off, 0, sizeof(off));
 
-    if (!(rda = read_args(OPT_TEMPLATE, src, j, a))) return FALSE;
+    /* Template senza /A, per la Startup e per i tooltype: SERVER ed EXPORT
+     * possono stare nell'una o negli altri, si controllano dopo l'unione */
+    for (t = OPT_TEMPLATE; *t; t++) {
+        if (t[0] == '/' && t[1] == 'A') { t++; continue; }
+        *d++ = *t;
+    }
+    *d = 0;
 
-    /* tooltype: stesso template senza /A (SERVER ed EXPORT stanno di
-     * solito nella Startup); ogni opzione presente prevale */
+    /* Startup: puo' mancare se tutto sta nell'icona */
+    if (st > 1024 && TypeOfMem(BADDR(st))) {
+        bstr2c((BSTR)st, src, sizeof(src) - 2);
+        for (i = j = 0; src[i]; i++)
+            if (src[i] != '"' && (UBYTE)src[i] >= ' ') src[j++] = src[i];
+        src[j++] = '\n';
+        src[j] = 0;
+        if (!(rda = read_args(itmpl, src, j, a))) return FALSE;
+    }
+
+    /* tooltype: ogni opzione presente prevale sulla Startup */
     if (tooltypes && *tooltypes) {
-        icon_to_args(tooltypes, icon_args, sizeof(icon_args) - 2);
+        icon_to_args(tooltypes, icon_args, sizeof(icon_args) - 2, off);
         if (icon_args[0]) {
-            const char *t;
-            char *d = itmpl;
-            for (t = OPT_TEMPLATE; *t; t++) {
-                if (t[0] == '/' && t[1] == 'A') { t++; continue; }
-                *d++ = *t;
-            }
-            *d = 0;
             j = strlen(icon_args);
             memcpy(isrc, icon_args, j);
             isrc[j++] = '\n';
@@ -2853,6 +2869,9 @@ static BOOL parse_startup(LONG st, const char *tooltypes)
                 icon_bad = TRUE;
             }
         }
+        /* switch spenti nell'icona ("READONLY=NO"), se l'icona e' valida */
+        if (!icon_bad)
+            for (i = 0; i < OPT_COUNT; i++) if (off[i]) a[i] = 0;
     }
 
     opt_server = dupstr((char *)a[0]);
@@ -3004,15 +3023,18 @@ void handler_main(const struct HandlerStartup *hs)
     for (c = devname; *c; c++) if (*c == ':') *c = 0;
     if (!devname[0] && devnode) bstr2c(devnode->dn_Name, devname, sizeof(devname));
 
-    /* Tooltype dell'icona prima di creare il volume (il nome puo' venire da
-     * li'). OS3: anche prima di rispondere a Mount. OS4: la piattaforma ha
-     * gia' risposto, ma il volume non esiste ancora. */
+    /* OS4: tooltype dell'icona prima di creare il volume (il nome puo' venire
+     * da li'); la piattaforma ha gia' risposto al pacchetto di avvio. OS3:
+     * niente icona (vedi find_icon_tooltypes), si risponde a Mount solo dopo
+     * aver letto le opzioni, cosi' Mount segnala una Startup sbagliata. */
     {
         static char tts[512];
         if (mini_init() || !devnode || (!pktport && !(pktport = CreateMsgPort())))
             startup_failed = TRUE;
         else {
+#ifdef __amigaos4__
             if (devname[0]) icon_path = find_icon_tooltypes(devname, tts, sizeof(tts));
+#endif
             if (!parse_startup((LONG)devnode->dn_Startup, tts)) startup_failed = TRUE;
         }
     }
@@ -3040,10 +3062,11 @@ void handler_main(const struct HandlerStartup *hs)
         ReplyPkt(pkt, DOSTRUE, 0);
     }
 
-    /* Il volume va creato SUBITO, prima di qualsiasi I/O DOS (log, locale):
-     * altrimenti chi ha fatto Mount puo' usare "NAS:" prima che esista e
-     * ottiene il requester "inserire il volume". Con Priority=5 nella
-     * mountlist l'handler non perde la CPU fino a qui. */
+    /* Il volume va creato SUBITO, prima di ogni altro I/O DOS (log,
+     * locale): chi ha fatto Mount puo' usare "NAS:" appena Mount torna, e
+     * se il volume non c'e' ottiene il requester "inserire il volume". Su
+     * OS4 prima di qui c'e' la lettura dell'icona (vedi sopra), che non si
+     * puo' spostare: VOLUME= puo' venire da li'. */
     {
         BOOL vol_ok = add_volume();
         if (vol_ok) plat_disk_event(TRUE);

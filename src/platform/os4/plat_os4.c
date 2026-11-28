@@ -311,16 +311,42 @@ ssize_t amiga_writev(int fd, const struct iovec *iov, int iovcnt)
 
 /* -------------------------------------------- disco inserito/tolto -- */
 
+/* Volume nella DosList. Predefinito: LockDosList + AddDosEntry/RemDosEntry
+ * (com'era prima, 20 cicli di Mount/Dismount senza crash). Con
+ * -DOS4_NBM_VOLUME: NonBlockingModifyDosEntry (NBM_ADDDOSENTRY,
+ * NBM_REMFREEDOSENTRY), che con shutdown.script e tooltype/os4.script ha
+ * fatto cadere il Workbench dopo il Dismount (porta dell'handler cancellata). */
+#ifdef OS4_NBM_VOLUME
 BOOL plat_volume_add(struct DosList *vol)
 {
     return IDOS->NonBlockingModifyDosEntry(vol, NBM_ADDDOSENTRY, NULL, NULL) != 0;
 }
 
-/* rimuove e libera: il nodo non va piu' toccato */
+/* rimuove e libera: il nodo non va piu' toccato. Prima la porta a NULL: se il
+ * DOS rimanda la rimozione, il nodo non punta a una porta cancellata. */
 void plat_volume_remove(struct DosList *vol)
 {
+    vol->dol_Port = NULL;
     IDOS->NonBlockingModifyDosEntry(vol, NBM_REMFREEDOSENTRY, NULL, NULL);
 }
+#else
+BOOL plat_volume_add(struct DosList *vol)
+{
+    BOOL ok;
+    IDOS->LockDosList(LDF_VOLUMES | LDF_WRITE);
+    ok = IDOS->AddDosEntry(vol) != 0;
+    IDOS->UnLockDosList(LDF_VOLUMES | LDF_WRITE);
+    return ok;
+}
+
+void plat_volume_remove(struct DosList *vol)
+{
+    IDOS->LockDosList(LDF_VOLUMES | LDF_WRITE);
+    IDOS->RemDosEntry(vol);
+    IDOS->UnLockDosList(LDF_VOLUMES | LDF_WRITE);
+    IDOS->FreeDosEntry(vol);
+}
+#endif
 
 void plat_disk_event(BOOL inserted)
 {
