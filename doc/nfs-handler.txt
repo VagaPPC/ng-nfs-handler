@@ -1,5 +1,5 @@
-NG-nfs-handler 0.9 beta -- NFS client filesystem handler for AmigaOS
-=====================================================================
+NG-nfs-handler 1.0 -- NFS client filesystem handler for AmigaOS
+===============================================================
 
 NG-nfs-handler mounts NFS exports from a Linux (or any NFSv3) server as a
 normal AmigaDOS volume. It is a DOS handler you put in L: and mount with a
@@ -15,7 +15,8 @@ C:Dismount (AmigaOS 4.1).
   - lazy mount: the network is contacted on first access, so the volume can
     be mounted at boot before the TCP/IP stack is up
   - automatic reconnection when the server restarts
-  - AmigaOS 4.1: 64-bit file sizes, files larger than 4 GB
+  - AmigaOS 4.1: 64-bit file sizes, files larger than 4 GB; options also
+    as tooltypes in the icon of the mountlist
 
 Tested on: AmigaOS 3.1 ROM + 3.9 (Vampire V4, Roadshow 4.364), AmigaOS 3.9
 in Amiberry (bsdsocket emulation), AmigaOS 4.1 FE (AmigaOne X5000, clib4

@@ -25,7 +25,7 @@
 #include <nfsc/libnfs.h>
 
 static const char verstag[] __attribute__((used)) =
-    "$VER: nfsls 0.9 (27.11.2026)";
+    "$VER: nfsls 1.0 (28.11.2026)";
 
 /* libnix: stack minimo del processo */
 unsigned long __stack = 65536;
