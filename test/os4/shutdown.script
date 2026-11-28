@@ -1,0 +1,30 @@
+; Smontaggio ripetuto durante un mount in corso (AmigaOS 4.1). Richiede
+; Assign NGNFS: e i file di test/tooltype/os4 (TT6: icona con ACTIVATE=1,
+; server inesistente). Il Workbench vede il volume e avvia il mount, poi
+; Dismount arriva mentre il mount e' in corso (1-3 s) o dopo il TIMEOUT (6 s).
+; Prima della correzione capitava a volte un Grim Reaper dopo lo smontaggio.
+; Risultati: NGNFS:build/os4-shutdown-out.txt e NGNFS:build/os4-tt6.log
+FailAt 21
+Set O NGNFS:build/os4-shutdown-out.txt
+Delete NGNFS:build/os4-tt6.log QUIET >NIL: *>NIL:
+Echo "== inizio" >$O
+Date >>$O
+Set N 0
+Lab giro
+Set N `Eval $N + 1`
+Set W `Eval $N MOD 4`
+Set W `Eval $W + 1`
+If VAL $W EQ 4
+  Set W 6
+EndIf
+Echo "-- giro $N, attesa $W s" >>$O
+Mount NGNFS:test/tooltype/os4/TT6 >>$O *>>$O
+Wait $W
+Dismount TT6: >>$O *>>$O
+Echo "rc=$RC" >>$O
+Wait 1
+If NOT VAL $N GE 20
+  Skip giro BACK
+EndIf
+Echo "== FINE" >>$O
+Date >>$O

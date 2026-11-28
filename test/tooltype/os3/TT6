@@ -1,0 +1,8 @@
+/* Prova tooltype di Mount (os3). Richiede Assign NGNFS:
+   Activate = 0: l'handler parte solo se l'icona dice ACTIVATE=1 (TT6). */
+Handler   = NGNFS:build/os3/nfs-handler
+StackSize = 32768
+Priority  = 5
+GlobVec   = -1
+Activate  = 0
+Startup   = "SERVER=192.168.1.100 EXPORT=/export/amiga VOLUME=TTV6 TIMEOUT=5 LOG=NGNFS:build/os3-tt6.log"

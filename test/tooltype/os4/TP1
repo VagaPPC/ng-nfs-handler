@@ -1,0 +1,9 @@
+/* Icona PNG (os4): l'handler non legge i tooltype di un'icona non classica
+   e lo scrive nel log. Server irraggiungibile, nessun accesso alla rete.
+   Lo script la copia in SYS:Storage/DOSDrivers/. Richiede Assign NGNFS: */
+Handler   = NGNFS:build/os4/nfs-handler
+StackSize = 65536
+Priority  = 5
+GlobVec   = -1
+Activate  = 1
+Startup   = "SERVER=192.168.1.100 EXPORT=/export/amiga VOLUME=TPNG1 LOG=NGNFS:build/os4-tp1.log"

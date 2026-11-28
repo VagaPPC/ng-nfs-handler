@@ -1,0 +1,36 @@
+; Mount e tooltype sconosciuti nell'icona (os3). Richiede Assign NGNFS:
+; Nessun accesso alla rete: i volumi non vengono mai usati.
+;   TT6  controllo: tooltype ACTIVATE=1 (mountlist Activate=0). Se Mount
+;        legge l'icona l'handler parte subito e crea build/os3-tt6.log
+;   TT7  tooltype disattivato "(CASE=INSENSITIVE)"
+;   TT8  tooltype attivo "CASE=INSENSITIVE" (sconosciuto a Mount)
+; Risultati: NGNFS:build/os3-tt-out.txt
+FailAt 21
+Set O NGNFS:build/os3-tt-out.txt
+Delete NGNFS:build/os3-tt#?.log QUIET >NIL:
+Echo "== Version Mount" >$O
+Version C:Mount FULL >>$O
+Echo "== mount TT6" >>$O
+Mount NGNFS:test/tooltype/os3/TT6 >>$O
+Echo "rc=$RC" >>$O
+Echo "== mount TT7" >>$O
+Mount NGNFS:test/tooltype/os3/TT7 >>$O
+Echo "rc=$RC" >>$O
+Echo "== mount TT8" >>$O
+Mount NGNFS:test/tooltype/os3/TT8 >>$O
+Echo "rc=$RC" >>$O
+Wait 3
+Echo "== handler partiti (log presenti)" >>$O
+List NGNFS:build/os3-tt#?.log LFORMAT "%n" >>$O
+Echo "== Info sui device" >>$O
+Assign DEVICES >>$O
+Echo "== smontaggio TT6" >>$O
+NGNFS:build/os3/NFSDismount TT6: >>$O
+Echo "rc=$RC" >>$O
+Echo "== smontaggio TT7" >>$O
+Assign TT7: DISMOUNT >>$O
+Echo "rc=$RC" >>$O
+Echo "== smontaggio TT8" >>$O
+Assign TT8: DISMOUNT >>$O
+Echo "rc=$RC" >>$O
+Echo "== FINE" >>$O

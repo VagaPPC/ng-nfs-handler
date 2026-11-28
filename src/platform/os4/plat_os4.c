@@ -104,6 +104,14 @@ static void bstr_copy(BSTR b, char *out, int max)
     out[n] = 0;
 }
 
+/* Uscita rimandata alla fine di plat_start (vedi plat_detach()): dopo la
+ * risposta allo smontaggio Dismount puo' scaricare il segmento, quindi
+ * prima deve finire tutto (uscita di clib4 compresa). Fino ad allora la
+ * porta resta viva e il DeviceNode punta a lei. */
+static struct DosPacket   *die_pkt;
+static struct DeviceNode  *fin_dn;
+static struct MsgPort     *fin_port;
+
 static int plat_main(int argc, char **argv)
 {
     handler_main(&hs);
@@ -195,6 +203,18 @@ int32 plat_start(STRPTR argstr, int32 arglen, struct ExecBase *sysbase)
     if (nil_out) { IDOS->SelectOutput(old_out); IDOS->Close(nil_out); }
     IDOS->SetConsolePort(old_con);
 out:
+    /* Da qui in poi niente che possa fare Wait(): la risposta allo
+     * smontaggio permette di scaricare il nostro codice, e il Forbid()
+     * resta fino alla fine del processo. */
+    IExec->Forbid();
+    if (fin_port && IDOS) {
+        if (die_pkt && fin_dn) fin_dn->dn_Port = NULL;
+        while ((m = IExec->GetMsg(fin_port)))
+            IDOS->ReplyPkt((struct DosPacket *)m->mn_Node.ln_Name, DOSFALSE,
+                           ERROR_ACTION_NOT_KNOWN);
+        IExec->DeleteMsgPort(fin_port);
+    }
+    if (die_pkt && IDOS) IDOS->ReplyPkt(die_pkt, DOSTRUE, 0);
     if (IDOS) IExec->DropInterface((struct Interface *)IDOS);
     if (DOSBase) IExec->CloseLibrary(DOSBase);
     IExec->Release();
@@ -207,6 +227,14 @@ out:
 int  mini_init(void) { return 0; }
 void mini_exit(void) { }
 const char *mini_errstr(int e) { return strerror(e); }
+
+void plat_detach(struct DeviceNode *dn, struct MsgPort *port, struct DosPacket *die)
+{
+    fin_dn   = dn;
+    fin_port = port;
+    die_pkt  = die;
+}
+
 void (*mini_assert_hook)(const char *file, int line, const char *expr);
 
 /* assert() di clib4: niente abort() in un handler. Si registra e si ferma
@@ -287,6 +315,43 @@ ssize_t amiga_writev(int fd, const struct iovec *iov, int iovcnt)
 }
 
 /* -------------------------------------------- disco inserito/tolto -- */
+
+/* Volume nella DosList. Predefinito: LockDosList + AddDosEntry/RemDosEntry
+ * (com'era prima, 20 cicli di Mount/Dismount senza crash). Con
+ * -DOS4_NBM_VOLUME: NonBlockingModifyDosEntry (NBM_ADDDOSENTRY,
+ * NBM_REMFREEDOSENTRY), che con shutdown.script e tooltype/os4.script ha
+ * fatto cadere il Workbench dopo il Dismount (porta dell'handler cancellata). */
+#ifdef OS4_NBM_VOLUME
+BOOL plat_volume_add(struct DosList *vol)
+{
+    return IDOS->NonBlockingModifyDosEntry(vol, NBM_ADDDOSENTRY, NULL, NULL) != 0;
+}
+
+/* rimuove e libera: il nodo non va piu' toccato. Prima la porta a NULL: se il
+ * DOS rimanda la rimozione, il nodo non punta a una porta cancellata. */
+void plat_volume_remove(struct DosList *vol)
+{
+    vol->dol_Port = NULL;
+    IDOS->NonBlockingModifyDosEntry(vol, NBM_REMFREEDOSENTRY, NULL, NULL);
+}
+#else
+BOOL plat_volume_add(struct DosList *vol)
+{
+    BOOL ok;
+    IDOS->LockDosList(LDF_VOLUMES | LDF_WRITE);
+    ok = IDOS->AddDosEntry(vol) != 0;
+    IDOS->UnLockDosList(LDF_VOLUMES | LDF_WRITE);
+    return ok;
+}
+
+void plat_volume_remove(struct DosList *vol)
+{
+    IDOS->LockDosList(LDF_VOLUMES | LDF_WRITE);
+    IDOS->RemDosEntry(vol);
+    IDOS->UnLockDosList(LDF_VOLUMES | LDF_WRITE);
+    IDOS->FreeDosEntry(vol);
+}
+#endif
 
 void plat_disk_event(BOOL inserted)
 {

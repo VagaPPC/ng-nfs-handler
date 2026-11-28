@@ -1,0 +1,18 @@
+; Prova di isolamento (AmigaOS 4.1): stessi file del test dei tooltype
+; (test/tooltype/os4/TI1, TI2 e le .info) copiati e cancellati in
+; SYS:Storage/DOSDrivers/, ma SENZA Mount: il nostro handler non parte.
+; Se il Workbench va in crash nei 2 minuti dopo, la causa non e' l'handler.
+; Risultati: NGNFS:build/os4-storagecopy-out.txt
+FailAt 21
+Set O NGNFS:build/os4-storagecopy-out.txt
+Echo "== copia" >$O
+Date >>$O
+Copy NGNFS:test/tooltype/os4/TI#? SYS:Storage/DOSDrivers/ QUIET >>$O *>>$O
+Wait 4
+Echo "== cancellazione" >>$O
+Delete SYS:Storage/DOSDrivers/TI#? QUIET >>$O *>>$O
+Date >>$O
+Echo "== attesa 2 minuti (non toccare il Workbench)" >>$O
+Wait 120
+Echo "== FINE senza crash" >>$O
+Date >>$O

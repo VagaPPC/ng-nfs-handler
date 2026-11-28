@@ -13,6 +13,7 @@
 #include <exec/execbase.h>
 #include <exec/memory.h>
 #include <dos/dosextens.h>
+#include <dos/filehandler.h>   /* struct DeviceNode */
 #include <devices/timer.h>
 #include <devices/input.h>
 #include <devices/inputevent.h>
@@ -118,6 +119,20 @@ void plat_lock_free(void *lock)
 BOOL plat_collect_ok(void) { return FALSE; }
 BOOL plat_collect(LONG type, APTR object) { return FALSE; }
 
+/* OS3: dopo la risposta restano DeleteMsgPort e la distruzione del pool,
+ * che non interrompono il Forbid(); poi il processo termina */
+void plat_detach(struct DeviceNode *dn, struct MsgPort *port, struct DosPacket *die)
+{
+    struct Message *m;
+    if (die) {
+        dn->dn_Task = NULL;
+        ReplyPkt(die, DOSTRUE, 0);
+    }
+    while ((m = GetMsg(port)))
+        ReplyPkt((struct DosPacket *)m->mn_Node.ln_Name, DOSFALSE, ERROR_ACTION_NOT_KNOWN);
+    DeleteMsgPort(port);
+}
+
 /* OS3: l'evento si scrive su input.device (IND_WRITEEVENT) */
 void plat_disk_event(BOOL inserted)
 {
@@ -138,4 +153,23 @@ void plat_disk_event(BOOL inserted)
     }
     if (io) DeleteIORequest((struct IORequest *)io);
     if (mp) DeleteMsgPort(mp);
+}
+
+/* ------------------------------------------------ volume nella DosList -- */
+
+BOOL plat_volume_add(struct DosList *vol)
+{
+    BOOL ok;
+    LockDosList(LDF_VOLUMES | LDF_WRITE);
+    ok = AddDosEntry(vol) != 0;
+    UnLockDosList(LDF_VOLUMES | LDF_WRITE);
+    return ok;
+}
+
+void plat_volume_remove(struct DosList *vol)
+{
+    LockDosList(LDF_VOLUMES | LDF_WRITE);
+    RemDosEntry(vol);
+    UnLockDosList(LDF_VOLUMES | LDF_WRITE);
+    FreeDosEntry(vol);
 }

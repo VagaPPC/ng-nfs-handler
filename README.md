@@ -30,7 +30,8 @@ Cross-compiled on Linux with [bebbo's amiga-gcc](https://github.com/bebbo/amiga-
 default location used by the Makefile.
 
     make                 # build/os3/: nfs-handler, NFSDismount, nfsls, NotifyTest
-    make dist            # build/NG-nfs-handler.lha (binaries, docs, sources)
+    make dist            # build/NG-nfs-handler.lha: OS3 + OS4 binaries, docs, sources
+                         # (needs both toolchains: amiga-gcc and adtools/clib4)
 
 ## Layout
 
@@ -42,7 +43,7 @@ default location used by the Makefile.
 | `libnfs/` | libnfs 8.1.0, unmodified (see `libnfs/VENDOR.txt`) |
 | `tools/` | `NFSDismount`, `nfsls`, `NotifyTest`, `pktlog-handler` (packet logger used to study DOS behaviour) |
 | `test/` | AmigaDOS test scripts and mountlists |
-| `dist/` | release files (Aminet readme, example mountlist) |
+| `dist/` | release files: Aminet readme, `OS3/` and `OS4/` example mountlists with icons |
 
 ## License
 

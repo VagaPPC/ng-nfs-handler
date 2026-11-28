@@ -179,26 +179,46 @@ $(BUILD)/NFSDismount: tools/nfsdismount/nfsdismount.c | $(BUILD)
 	$(CC) $(TOOL_CFLAGS) $(TOOL_LDFLAGS) -o $@ $<
 
 # ------------------------------------------------------------------- dist --
-# Archivio di rilascio: binari (senza simboli), documentazione, licenze e
-# sorgenti completi (richiesti dalla LGPL).
-DIST_DIR := build/dist/NG-nfs-handler
-STRIP    := $(M68K_PREFIX)/bin/m68k-amigaos-strip
+# Archivio di rilascio unico OS3 + OS4: binari (senza simboli), mountlist
+# con icona per ciascun sistema, documentazione, licenze e sorgenti completi
+# (richiesti dalla LGPL). Ricompila entrambe le piattaforme con sub-make.
+# In Source/ vanno SOLO i file tracciati da git: le mountlist con i dati
+# della rete locale (test/*/local/, escluse da git) non devono uscire.
+DIST_TOP  := build/dist
+DIST_DIR  := $(DIST_TOP)/NG-nfs-handler
+# Toolchain dai prefissi gia' usati per compilare (M68K_PREFIX, OS4_SDK),
+# cosi' "make dist M68K_PREFIX=... OS4_SDK=..." vale anche qui.
+OS3_STRIP := $(if $(M68K_PREFIX),$(M68K_PREFIX)/bin/m68k-amigaos-strip,m68k-amigaos-strip)
+OS4_STRIP := $(firstword $(wildcard /opt/ppc-amigaos/bin/ppc-amigaos-strip) \
+             $(wildcard $(HOME)/toolchains/bin/ppc-amigaos-strip) ppc-amigaos-strip)
+DIST_OS4_SDK := $(or $(OS4_SDK),$(firstword $(wildcard /opt/ppc-amigaos/ppc-amigaos/SDK) \
+                $(wildcard $(HOME)/toolchains/ppc-amigaos-rootfs/opt/ppc-amigaos/ppc-amigaos/SDK)))
+CLIB4_LICENSE := $(DIST_OS4_SDK)/clib4/LICENSE
 
-dist: all
-	rm -rf build/dist build/NG-nfs-handler.lha
-	mkdir -p $(DIST_DIR)/L $(DIST_DIR)/C $(DIST_DIR)/Tools $(DIST_DIR)/Docs \
-	         $(DIST_DIR)/Storage/DOSDrivers $(DIST_DIR)/Source
-	cp $(BUILD)/nfs-handler $(DIST_DIR)/L/
-	cp $(BUILD)/NFSDismount $(DIST_DIR)/C/
-	cp $(BUILD)/nfsls $(BUILD)/NotifyTest $(DIST_DIR)/Tools/
-	$(STRIP) $(DIST_DIR)/L/nfs-handler $(DIST_DIR)/C/NFSDismount \
-	         $(DIST_DIR)/Tools/nfsls $(DIST_DIR)/Tools/NotifyTest
-	cp dist/Storage/DOSDrivers/NFS0 $(DIST_DIR)/Storage/DOSDrivers/
+dist:
+	@command -v $(OS3_STRIP) >/dev/null || { echo "m68k-amigaos-strip non trovato: make dist M68K_PREFIX=..."; exit 1; }
+	@test -f $(CLIB4_LICENSE) || { echo "LICENSE di clib4 non trovata: make dist OS4_SDK=..."; exit 1; }
+	$(MAKE) PLATFORM=os3 nfsdismount nfsls handler notifytest
+	$(MAKE) PLATFORM=os4 handler
+	rm -rf $(DIST_TOP) build/NG-nfs-handler.lha
+	mkdir -p $(DIST_DIR)/OS3/L $(DIST_DIR)/OS3/C $(DIST_DIR)/OS3/Tools \
+	         $(DIST_DIR)/OS4/L $(DIST_DIR)/Docs $(DIST_DIR)/Source
+	cp build/os3/nfs-handler $(DIST_DIR)/OS3/L/
+	cp build/os3/NFSDismount $(DIST_DIR)/OS3/C/
+	cp build/os3/nfsls build/os3/NotifyTest $(DIST_DIR)/OS3/Tools/
+	$(OS3_STRIP) $(DIST_DIR)/OS3/L/nfs-handler $(DIST_DIR)/OS3/C/NFSDismount \
+	             $(DIST_DIR)/OS3/Tools/nfsls $(DIST_DIR)/OS3/Tools/NotifyTest
+	cp build/os4/nfs-handler $(DIST_DIR)/OS4/L/
+	$(OS4_STRIP) $(DIST_DIR)/OS4/L/nfs-handler
+	cp -r dist/OS3/Storage $(DIST_DIR)/OS3/
+	cp -r dist/OS4/Storage $(DIST_DIR)/OS4/
 	cp doc/nfs-handler.txt doc/nfs-handler.it.txt COPYING $(DIST_DIR)/Docs/
 	cp libnfs/COPYING $(DIST_DIR)/Docs/COPYING.libnfs
-	cp dist/NG-nfs-handler.readme build/dist/
-	cp -r Makefile README.md COPYING src tools libnfs test doc dist $(DIST_DIR)/Source/
-	cd build/dist && lha -aq ../NG-nfs-handler.lha NG-nfs-handler NG-nfs-handler.readme
+	cp $(CLIB4_LICENSE) $(DIST_DIR)/Docs/COPYING.clib4
+	cp dist/NG-nfs-handler.readme $(DIST_TOP)/
+	git ls-files -z -- Makefile README.md COPYING src tools libnfs test doc dist | \
+	    xargs -0 cp --parents -t $(DIST_DIR)/Source/
+	cd $(DIST_TOP) && lha -aq ../NG-nfs-handler.lha NG-nfs-handler NG-nfs-handler.readme
 	@echo "Creato build/NG-nfs-handler.lha"
 
 clean:

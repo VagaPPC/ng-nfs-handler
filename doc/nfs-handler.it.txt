@@ -3,10 +3,10 @@ NG-nfs-handler 0.9 beta -- handler per filesystem NFS su AmigaOS
 
 NG-nfs-handler monta le condivisioni NFS di un server Linux (o di qualsiasi
 server NFSv3) come un normale volume AmigaDOS. È un handler DOS da mettere
-in L: e montare con una mountlist standard; si smonta con il comando
-NFSDismount.
+in L: e montare con una mountlist standard; si smonta con NFSDismount
+(AmigaOS 3.x) o C:Dismount (AmigaOS 4.1).
 
-  - NFSv3 su TCP (libnfs 8.1.0 integrata, nessuna libreria esterna)
+  - NFSv3 su TCP (libnfs 8.1.0 integrata)
   - lettura e scrittura: file, directory, rename, delete, protezioni, date,
     hard link e soft link relativi
   - nomi senza distinzione tra maiuscole e minuscole, come ogni filesystem
@@ -16,15 +16,18 @@ NFSDismount.
   - mount "lazy": la rete viene contattata al primo accesso, quindi il
     volume si può montare al boot prima che lo stack TCP/IP sia attivo
   - riconnessione automatica quando il server si riavvia
+  - AmigaOS 4.1: dimensioni a 64 bit, file oltre i 4 GB
 
 Provato su: ROM AmigaOS 3.1 + 3.9 (Vampire V4, Roadshow 4.364), AmigaOS 3.9
-in Amiberry (emulazione bsdsocket).
+in Amiberry (emulazione bsdsocket), AmigaOS 4.1 FE (AmigaOne X5000, clib4
+2.5, Roadshow).
 
 
 1. Requisiti
 ------------
 
-  - AmigaOS 3.1 o successivo, 68020 o superiore
+  - AmigaOS 3.1 o successivo, 68020 o superiore; oppure AmigaOS 4.1 con
+    clib4.library 2.5 o successiva (da OS4Depot)
   - uno stack TCP/IP con bsdsocket.library (Roadshow, AmiTCP, Miami,
     Genesis, oppure l'emulazione bsdsocket di UAE/Amiberry)
   - un server NFS con NFSv3 su TCP attivo (nfs-kernel-server di Linux lo
@@ -34,10 +37,18 @@ in Amiberry (emulazione bsdsocket).
 2. Installazione
 ----------------
 
-  Copy L/nfs-handler     L:
-  Copy C/NFSDismount     C:
+L'archivio ha un cassetto per sistema: OS3/ (AmigaOS 3.x, 68k) e OS4/
+(AmigaOS 4.1, PPC). Su AmigaOS 3.x:
 
-Poi copia la mountlist di esempio Storage/DOSDrivers/NFS0 in
+  Copy OS3/L/nfs-handler     L:
+  Copy OS3/C/NFSDismount     C:
+
+Su AmigaOS 4.1 (per smontare si usa il C:Dismount di sistema):
+
+  Copy OS4/L/nfs-handler     L:
+
+Poi copia la mountlist di esempio OS3/Storage/DOSDrivers/NFS0 (o quella
+di OS4/), con la sua icona, in
 DEVS:DOSDrivers/ (montaggio al boot) oppure in SYS:Storage/DOSDrivers/
 (montaggio a mano) e modifica la riga Startup (vedi sezione 4).
 
@@ -47,13 +58,22 @@ Montaggio e uso:
   Dir NAS:
 
 NFS0: è il device, NAS: il nome del volume (opzione VOLUME=).
-Per smontare:
+Per smontare su AmigaOS 3.x:
 
   NFSDismount NFS0:
 
 NON usare "Assign NFS0: DISMOUNT": su AmigaOS 3.x toglie il device senza
 avvisare l'handler. nfs-handler se ne accorge e si chiude da solo quando
 nessuno usa più il volume, ma il modo pulito è NFSDismount.
+
+Per smontare su AmigaOS 4.1 si usa il comando di sistema:
+
+  Dismount NFS0:
+
+Lock, file e notifiche ancora aperti sul volume vengono ceduti al DOS,
+quindi lo smontaggio riesce anche con una Shell posizionata su NAS:. Viene
+rifiutato ("oggetto in uso") solo mentre ci sono richieste NFS in corso o
+dati scritti non ancora confermati dal server: aspetta un attimo e riprova.
 
 
 3. Mountlist di esempio
@@ -68,7 +88,8 @@ nessuno usa più il volume, ma il modo pulito è NFSDismount.
 
 La stringa Startup DEVE essere tra virgolette (altrimenti Mount la
 rifiuta). Lascia Priority = 5: l'handler deve avere priorità più alta della
-Shell che lo monta.
+Shell che lo monta. Su AmigaOS 4.1 usa StackSize = 65536 (la mountlist
+di esempio in OS4/ lo fa già).
 
 
 4. Opzioni di Startup
@@ -96,11 +117,27 @@ Shell che lo monta.
   WSIZE=16384        byte massimi per scrittura NFS
   PAR=4              richieste di lettura/scrittura in parallelo per
                      pacchetto DOS (1-16)
-  TIMEOUT=10         secondi prima che una richiesta NFS fallisca
+  TIMEOUT=10         secondi prima che una richiesta NFS fallisca. È anche
+                     il tempo che il mount aspetta un server irraggiungibile
+                     prima di arrendersi con "Nessun disco" (Riprova ritenta)
   NOTIFYPOLL=4       secondi tra un controllo delle notifiche e l'altro
                      (0 = notifiche DOS disattivate)
   LOG=file           scrive un log di diagnosi (ogni pacchetto DOS, chiamate
                      NFS, tempi). Usa RAM:, non un volume di rete. Lento!
+
+Solo AmigaOS 4.1: le stesse opzioni si possono dare come tooltype
+nell'icona della mountlist (<device>.info, ad es. NFS0.info). L'icona si
+cerca in DEVS:DOSDrivers/ e poi in SYS:Storage/DOSDrivers/. Un'opzione
+presente nell'icona prevale sulla stringa Startup. Uno switch si attiva con
+"READONLY" o "READONLY=YES" e si spegne con "READONLY=NO" (anche se la
+Startup contiene READONLY). Un'opzione con valore vuoto ("LOG=") si ignora.
+I tooltype tra parentesi e le parole chiave di Mount (ACTIVATE,
+STACKSIZE...) si ignorano, e un'icona con valori non validi viene ignorata
+per intero (vedi il log). SERVER ed EXPORT possono stare nella stringa
+Startup o nell'icona; se l'icona contiene tutto, la Startup si può anche
+omettere. Su AmigaOS 3.x l'handler non legge l'icona: leggerla durante
+l'avvio dell'handler mandava in crash il sistema, quindi le opzioni vanno
+nella stringa Startup.
 
 
 5. Configurazione del server (Linux)
@@ -134,7 +171,9 @@ scritture falliscono con "protetto in scrittura".
     Unix; D segue W. H, S, P, A e i commenti (filenote) vengono accettati e
     scartati.
   - Le dimensioni dei file sono a 32 bit su AmigaOS 3.x: i file oltre 2 GB
-    appaiono da 2 GB e non si possono leggere oltre quel punto.
+    appaiono da 2 GB e non si possono leggere oltre quel punto. Su
+    AmigaOS 4.1 le dimensioni sono a 64 bit (ExamineData, ExamineDir, seek
+    e SetFileSize a 64 bit): i file grandi si vedono e si leggono interi.
   - Soft link: si possono creare solo con bersaglio relativo. I link sul
     server vengono seguiti in modo trasparente (un link a una directory
     appare come una directory).
@@ -152,8 +191,8 @@ scritture falliscono con "protetto in scrittura".
   - Se il server si riavvia, l'operazione in corso in quel momento fallisce
     con "Nessun disco" (requester Riprova/Annulla): premi Riprova. I file
     aperti vengono riaperti da soli. Se il server è del tutto
-    irraggiungibile, il primo accesso aspetta il timeout di connessione TCP
-    dello stack.
+    irraggiungibile, il mount si arrende dopo TIMEOUT secondi con lo stesso
+    requester.
 
 
 7. Problemi comuni
@@ -166,15 +205,20 @@ scritture falliscono con "protetto in scrittura".
     dell'Amiga, oppure serve "insecure" (emulatori).
   - Le scritture falliscono con "protetto in scrittura": la directory
     esportata non è scrivibile dall'utente anonuid/UID.
-  - NFSDismount dice "oggetto in uso": qualcosa usa ancora il volume (una
-    Shell con CD lì sopra, un lister di Directory Opus, un file aperto).
-    Con LOG= il log elenca ogni lock aperto e il task che lo possiede.
+  - NFSDismount dice "oggetto in uso" (AmigaOS 3.x): qualcosa usa ancora
+    il volume (una Shell con CD lì sopra, un lister di Directory Opus, un
+    file aperto). Con LOG= il log elenca ogni lock aperto e il task che lo
+    possiede. Su AmigaOS 4.1 Dismount cede gli oggetti aperti al DOS, vedi
+    capitolo 2.
   - Per segnalare un bug: aggiungi LOG=RAM:nfs-handler.log alla riga
     Startup, riproduci il problema e invia il log.
 
 
 8. Strumenti inclusi
 --------------------
+
+Solo AmigaOS 3.x (in OS3/; su AmigaOS 4.1 si usa il C:Dismount di
+sistema):
 
   C/NFSDismount    DEVICE/A,KEEPSEG/S   smontaggio pulito (invia ACTION_DIE)
   Tools/nfsls      SERVER/A,EXPORT/A,PATH,UID/N,GID/N,WRITETEST/S
@@ -187,7 +231,8 @@ scritture falliscono con "protetto in scrittura".
 
 NG-nfs-handler è software libero, distribuito sotto la GNU Lesser General
 Public License versione 2.1 (vedi COPYING). Include libnfs di Ronnie
-Sahlberg (LGPL 2.1 / BSD, vedi Docs/COPYING.libnfs). Il codice sorgente
-completo è nel cassetto Source/ dell'archivio.
+Sahlberg (LGPL 2.1 / BSD, vedi Docs/COPYING.libnfs). La versione per
+AmigaOS 4.1 usa clib4 (BSD 3-Clause, vedi Docs/COPYING.clib4). Il codice
+sorgente completo è nel cassetto Source/ dell'archivio.
 
 Copyright (C) 2026 VagaPPC (Benedetto Lorello)

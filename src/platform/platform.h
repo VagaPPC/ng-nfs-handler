@@ -57,6 +57,15 @@ int plat_wait(int fd, int events, ULONG *sigs);
  * le icone. */
 void plat_disk_event(BOOL inserted);
 
+/* Nodo del volume nella DosList: LockDosList + AddDosEntry/RemDosEntry +
+ * FreeDosEntry, su OS3 e (predefinito) su OS4. Su OS4 con -DOS4_NBM_VOLUME:
+ * NonBlockingModifyDosEntry (NBM_ADDDOSENTRY, NBM_REMFREEDOSENTRY), come
+ * suggerisce dos.doc per gli handler; per ora non e' il predefinito (vedi
+ * plat_os4.c). */
+struct DosList;
+BOOL plat_volume_add(struct DosList *vol);
+void plat_volume_remove(struct DosList *vol);
+
 /* Lock pubblici dell'handler (struct NLock, con la FileLock in testa).
  * OS4: allocati con AllocDosObject(DOS_LOCK), condizione perche' il
  * lockhandler del DOS li accetti con ACTION_COLLECT. Memoria azzerata. */
@@ -71,5 +80,18 @@ void  plat_lock_free(void *lock);
 #define PLAT_COLLECT_NOTIFY      3
 BOOL plat_collect_ok(void);
 BOOL plat_collect(LONG type, APTR object);
+
+/* Uscita dell'handler, sotto Forbid(): staccarsi dal DeviceNode (dn_Task a
+ * NULL, solo se c'e' il pacchetto di smontaggio die; senza, l'handler e'
+ * orfano e il nodo non c'e' piu'), rifiutare i pacchetti rimasti sulla
+ * porta, cancellarla e rispondere a die (ACTION_DIE / ACTION_SHUTDOWN). Dopo
+ * la risposta chi smonta puo' scaricare il segmento: tutto va fatto
+ * insieme, senza niente che interrompa il Forbid(). OS3: subito (dopo resta
+ * solo la distruzione del pool). OS4: alla fine di plat_start, dopo
+ * l'uscita di clib4 (che chiude file e librerie e puo' fare Wait()); fino
+ * ad allora la porta resta valida e il DeviceNode punta ancora a lei, cosi'
+ * il DOS non avvia una seconda istanza e nessuno manda pacchetti a una
+ * porta cancellata. */
+void plat_detach(struct DeviceNode *dn, struct MsgPort *port, struct DosPacket *die);
 
 #endif

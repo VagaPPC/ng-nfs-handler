@@ -3,16 +3,22 @@ Author:       VagaPPC (Benedetto Lorello)
 Uploader:     VagaPPC (Benedetto Lorello)
 Type:         comm/net
 Version:      0.9
-Architecture: m68k-amigaos >= 3.1.0
+Architecture: m68k-amigaos >= 3.1.0; ppc-amigaos >= 4.1.0
 Distribution: Aminet
-Requires:     68020+, bsdsocket.library (Roadshow, AmiTCP, Miami, ...)
+Requires:     OS3: 68020+, bsdsocket.library (Roadshow, AmiTCP, Miami, ...)
+              OS4: clib4.library 2.5 or newer (OS4Depot)
 
 NG-nfs-handler mounts NFS exports from a Linux (or any NFSv3) server as a
 normal AmigaDOS volume. It is a DOS handler: put it in L:, mount it with a
-standard mountlist and unmount it with NFSDismount.
+standard mountlist and unmount it with NFSDismount (OS3) or C:Dismount
+(OS4).
+
+One archive for both systems: take the files from OS3/ or OS4/. Each
+contains L/nfs-handler and an example mountlist with icon in
+Storage/DOSDrivers/.
 
 Features
-  - NFSv3 over TCP, libnfs 8.1.0 built in (no external libraries)
+  - NFSv3 over TCP, libnfs 8.1.0 built in
   - read and write: files, directories, rename, delete, protection, dates,
     hard links and relative soft links
   - case-insensitive names like every Amiga filesystem (optional)
@@ -20,15 +26,18 @@ Features
   - DOS notification (StartNotify) by polling
   - lazy mount: can be mounted at boot before the TCP/IP stack is up
   - automatic reconnection when the server restarts
-  - clean unmount with NFSDismount
+  - clean unmount with NFSDismount (OS3) or C:Dismount (OS4)
+  - OS4: 64-bit packets and ExamineData, files larger than 4 GB
+  - TIMEOUT option: Mount gives up on an unreachable server
 
-Tested on a Vampire V4 (Roadshow 4.364) and in Amiberry. On the Vampire it
-is as fast as smb2fs (about 2.5 MB/s reading, limited by the network
-hardware).
+Tested on a Vampire V4 (Roadshow 4.364), in Amiberry and on AmigaOS 4.1.
+On the Vampire it is as fast as smb2fs (about 2.5 MB/s reading, limited by
+the network hardware).
 
 This is a BETA: please read Docs/nfs-handler.txt, especially "Behaviour and
 limits", before using it on data you care about.
 
 Italian documentation included (Docs/nfs-handler.it.txt).
 
-License: LGPL 2.1, complete source code included (Source/).
+License: LGPL 2.1, complete source code included (Source/). Licenses of
+libnfs (LGPL 2.1 / BSD) and clib4 (BSD 3-Clause) in Docs/.

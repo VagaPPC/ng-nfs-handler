@@ -3,9 +3,10 @@ NG-nfs-handler 0.9 beta -- NFS client filesystem handler for AmigaOS
 
 NG-nfs-handler mounts NFS exports from a Linux (or any NFSv3) server as a
 normal AmigaDOS volume. It is a DOS handler you put in L: and mount with a
-standard mountlist; it is unmounted with the NFSDismount command.
+standard mountlist; it is unmounted with NFSDismount (AmigaOS 3.x) or
+C:Dismount (AmigaOS 4.1).
 
-  - NFSv3 over TCP (libnfs 8.1.0 inside, no external libraries needed)
+  - NFSv3 over TCP (libnfs 8.1.0 inside)
   - read and write: files, directories, rename, delete, protection, dates,
     hard links and relative soft links
   - case-insensitive names like every Amiga filesystem (optional)
@@ -14,15 +15,18 @@ standard mountlist; it is unmounted with the NFSDismount command.
   - lazy mount: the network is contacted on first access, so the volume can
     be mounted at boot before the TCP/IP stack is up
   - automatic reconnection when the server restarts
+  - AmigaOS 4.1: 64-bit file sizes, files larger than 4 GB
 
 Tested on: AmigaOS 3.1 ROM + 3.9 (Vampire V4, Roadshow 4.364), AmigaOS 3.9
-in Amiberry (bsdsocket emulation).
+in Amiberry (bsdsocket emulation), AmigaOS 4.1 FE (AmigaOne X5000, clib4
+2.5, Roadshow).
 
 
 1. Requirements
 ---------------
 
-  - AmigaOS 3.1 or later, 68020 or better
+  - AmigaOS 3.1 or later, 68020 or better; or AmigaOS 4.1 with
+    clib4.library 2.5 or later (from OS4Depot)
   - a TCP/IP stack providing bsdsocket.library (Roadshow, AmiTCP, Miami,
     Genesis, or the bsdsocket emulation of UAE/Amiberry)
   - an NFS server with NFSv3 over TCP enabled (Linux nfs-kernel-server
@@ -32,10 +36,18 @@ in Amiberry (bsdsocket emulation).
 2. Installation
 ---------------
 
-  Copy L/nfs-handler     L:
-  Copy C/NFSDismount     C:
+The archive has one drawer per system: OS3/ (AmigaOS 3.x, 68k) and OS4/
+(AmigaOS 4.1, PPC). On AmigaOS 3.x:
 
-Then copy the example mountlist Storage/DOSDrivers/NFS0 to
+  Copy OS3/L/nfs-handler     L:
+  Copy OS3/C/NFSDismount     C:
+
+On AmigaOS 4.1 (use the system's C:Dismount to unmount):
+
+  Copy OS4/L/nfs-handler     L:
+
+Then copy the example mountlist OS3/Storage/DOSDrivers/NFS0 (or the OS4/
+one), with its icon, to
 DEVS:DOSDrivers/ (to mount at boot) or to SYS:Storage/DOSDrivers/ (to mount
 by hand), and edit the Startup line (see section 4).
 
@@ -45,13 +57,22 @@ Mount and use it:
   Dir NAS:
 
 NFS0: is the device, NAS: is the volume name (VOLUME= option).
-To unmount:
+To unmount on AmigaOS 3.x:
 
   NFSDismount NFS0:
 
 Do NOT use "Assign NFS0: DISMOUNT": on AmigaOS 3.x it removes the device
 without telling the handler. nfs-handler notices it and quits by itself
 when nothing uses the volume any more, but NFSDismount is the clean way.
+
+To unmount on AmigaOS 4.1, use the system command:
+
+  Dismount NFS0:
+
+Locks, files and notifications still open on the volume are handed over to
+the DOS, so the unmount succeeds even with a Shell CD'd to NAS:. It is
+refused ("object in use") only while NFS requests are running or written
+data has not been committed yet: wait a moment and try again.
 
 
 3. Example mountlist
@@ -66,7 +87,8 @@ when nothing uses the volume any more, but NFSDismount is the clean way.
 
 The Startup string MUST be enclosed in double quotes (Mount rejects it
 otherwise). Keep Priority = 5: the handler must run at a higher priority
-than the shell that mounts it.
+than the shell that mounts it. On AmigaOS 4.1 use StackSize = 65536 (the
+OS4/ example mountlist already does).
 
 
 4. Startup options
@@ -93,11 +115,27 @@ than the shell that mounts it.
   RSIZE=16384        maximum bytes per NFS read
   WSIZE=16384        maximum bytes per NFS write
   PAR=4              parallel read/write requests per DOS packet (1-16)
-  TIMEOUT=10         seconds before an NFS request fails
+  TIMEOUT=10         seconds before an NFS request fails. It is also how
+                     long the mount waits for an unreachable server before
+                     giving up with "No disk present" (Retry tries again).
   NOTIFYPOLL=4       seconds between notification polls (0 = disable
                      DOS notification)
   LOG=file           write a debug log (every DOS packet, NFS calls and
                      timings). Use RAM:, not a network volume. Slow!
+
+AmigaOS 4.1 only: the same options can be given as tooltypes in the icon
+of the mountlist (<device>.info, e.g. NFS0.info). The icon is looked for in
+DEVS:DOSDrivers/ and then in SYS:Storage/DOSDrivers/. An option present in
+the icon wins over the Startup string. A switch is turned on with
+"READONLY" or "READONLY=YES" and turned off with "READONLY=NO" (even if the
+Startup string has READONLY). An option with an empty value ("LOG=") is
+ignored. Tooltypes in parentheses and the Mount keywords (ACTIVATE,
+STACKSIZE...) are ignored, and an icon with invalid values is ignored as a
+whole (see the log). SERVER and EXPORT can be in the Startup string or in
+the icon; the Startup string can even be left out if the icon has
+everything. On AmigaOS 3.x the handler does not read the icon: reading it
+while the handler starts crashed the system, so put the options in the
+Startup string.
 
 
 5. Server setup (Linux)
@@ -129,7 +167,9 @@ with "write protected".
   - Protection bits: R, W, E map to the owner bits of the Unix mode; D
     follows W. H, S, P, A and file comments are accepted and discarded.
   - File sizes are 32 bit on AmigaOS 3.x: files larger than 2 GB are shown
-    as 2 GB and cannot be read past that point.
+    as 2 GB and cannot be read past that point. On AmigaOS 4.1 sizes are
+    64 bit (ExamineData, ExamineDir, 64-bit seek and SetFileSize), so big
+    files are shown and read in full.
   - Soft links: only relative targets can be created. Links on the server
     are followed transparently (a link to a directory looks like a
     directory).
@@ -146,7 +186,8 @@ with "write protected".
   - If the server restarts, the operation running at that moment fails
     with "No disk present" (Retry/Cancel requester); press Retry. Open
     files are reopened automatically. If the server host is completely
-    unreachable, the first access waits for the stack's TCP connect timeout.
+    unreachable, the mount gives up after TIMEOUT seconds with the same
+    requester.
 
 
 7. Troubleshooting
@@ -159,15 +200,19 @@ with "write protected".
     address, or needs "insecure" (emulators).
   - Writes fail with "write protected": the export directory is not
     writable by the anonuid/UID user.
-  - NFSDismount says "object in use": something still uses the volume
-    (a Shell with CD on it, a Directory Opus lister, an open file). With
-    LOG= the log lists every open lock and the task that owns it.
+  - NFSDismount says "object in use" (AmigaOS 3.x): something still uses
+    the volume (a Shell with CD on it, a Directory Opus lister, an open
+    file). With LOG= the log lists every open lock and the task that owns
+    it. On AmigaOS 4.1 Dismount hands open objects to the DOS, see
+    section 2.
   - For a bug report: add LOG=RAM:nfs-handler.log to the Startup line,
     reproduce, and send the log.
 
 
 8. Included tools
 -----------------
+
+AmigaOS 3.x only (in OS3/; on AmigaOS 4.1 use the system's C:Dismount):
 
   C/NFSDismount   DEVICE/A,KEEPSEG/S   clean unmount (sends ACTION_DIE)
   Tools/nfsls     SERVER/A,EXPORT/A,PATH,UID/N,GID/N,WRITETEST/S
@@ -180,7 +225,8 @@ with "write protected".
 
 NG-nfs-handler is free software, distributed under the GNU Lesser General
 Public License version 2.1 (see COPYING). It includes libnfs by Ronnie
-Sahlberg (LGPL 2.1 / BSD, see Docs/COPYING.libnfs). The complete source
-code is in the Source/ drawer of the archive.
+Sahlberg (LGPL 2.1 / BSD, see Docs/COPYING.libnfs). The AmigaOS 4.1
+version uses clib4 (BSD 3-Clause, see Docs/COPYING.clib4). The complete
+source code is in the Source/ drawer of the archive.
 
 Copyright (C) 2026 VagaPPC (Benedetto Lorello)
