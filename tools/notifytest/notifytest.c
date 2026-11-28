@@ -13,7 +13,7 @@
 #include <proto/exec.h>
 #include <proto/dos.h>
 
-static const char verstag[] __attribute__((used)) = "$VER: NotifyTest 0.9 (27.11.2026)";
+static const char verstag[] __attribute__((used)) = "$VER: NotifyTest 1.0 (28.11.2026)";
 
 int main(void)
 {

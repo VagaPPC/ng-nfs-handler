@@ -67,7 +67,7 @@ typedef struct timerequest timereq_t;
 #define ACTION_SHUTDOWN 3000    /* OS4 (V51+): sostituisce ACTION_DIE */
 #endif
 
-#define HANDLER_VERSION "nfs-handler 0.9 (27.11.2026) beta"
+#define HANDLER_VERSION "nfs-handler 1.0 (28.11.2026)"
 static const char verstag[] __attribute__((used)) = "$VER: " HANDLER_VERSION;
 
 /* tipi NFSv3 (libnfs-raw-nfs.h) */

@@ -29,7 +29,7 @@
 #include <proto/dos.h>
 
 static const char verstag[] __attribute__((used)) =
-    "$VER: NFSDismount 0.9 (27.11.2026)";
+    "$VER: NFSDismount 1.0 (28.11.2026)";
 
 extern struct ExecBase *SysBase;
 

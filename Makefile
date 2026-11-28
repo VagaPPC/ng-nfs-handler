@@ -11,6 +11,7 @@
 # Implementate: os3, os4.
 
 PLATFORM ?= os3
+.DEFAULT_GOAL := all
 BUILD    := build/$(PLATFORM)
 
 # ---------------------------------------------------------------- os3 ----
