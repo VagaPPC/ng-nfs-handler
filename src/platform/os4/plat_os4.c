@@ -145,13 +145,6 @@ int32 plat_start(STRPTR argstr, int32 arglen, struct ExecBase *sysbase)
 
     hs.devnode = (struct DeviceNode *)BADDR(pkt->dp_Arg3);
     bstr_copy((BSTR)pkt->dp_Arg1, hs.devname, sizeof(hs.devname));
-    /* "NFS0:" -> "NFS0"; vuoto -> dn_Name */
-    {
-        char *c;
-        for (c = hs.devname; *c; c++) if (*c == ':') { *c = 0; break; }
-        if (!hs.devname[0] && hs.devnode)
-            bstr_copy(hs.devnode->dn_Name, hs.devname, sizeof(hs.devname));
-    }
     hs.port = hs.devnode ? IExec->CreateMsgPort() : NULL;
     if (!hs.port) {
         IDOS->ReplyPkt(pkt, DOSFALSE, hs.devnode ? ERROR_NO_FREE_STORE : ERROR_BAD_TEMPLATE);

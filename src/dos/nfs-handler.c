@@ -2634,6 +2634,7 @@ static char *dupstr(const char *s) { return s ? strdup(s) : NULL; }
 static const char *icon_path;          /* icona letta (per il log) */
 static char        icon_args[512];     /* opzioni prese dall'icona */
 static BOOL        icon_bad;           /* tooltype non validi, ignorati */
+static BOOL        icon_format;        /* icona non classica (PNG): ignorata */
 
 static int upc(int c) { return (c >= 'a' && c <= 'z') ? c - 32 : c; }
 
@@ -2744,18 +2745,23 @@ static BOOL skip_image(BPTR fh)
 }
 
 /* Tooltype attivi (non vuoti, non tra parentesi) di <path>.info in buf,
- * separati da '\n'. FALSE se l'icona non c'e' o non si legge. */
-static BOOL read_icon_tooltypes(const char *path, char *buf, ULONG size)
+ * separati da '\n'. Ritorna ICON_NONE se il file non c'e' o non si legge,
+ * ICON_OK, o ICON_FORMAT se c'e' ma non e' un'icona classica (DiskObject):
+ * le icone PNG di OS4 tengono i tooltype altrove e non si leggono. */
+#define ICON_NONE   0
+#define ICON_OK     1
+#define ICON_FORMAT 2
+static int read_icon_tooltypes(const char *path, char *buf, ULONG size)
 {
     char  name[140], line[256];
     UBYTE h[78], w[4];
     BPTR  fh;
     ULONG n = 0, count, i, len;
-    BOOL  ok = FALSE;
+    int   ret = ICON_FORMAT;          /* da qui il file c'e' */
 
     buf[0] = 0;
     snprintf(name, sizeof(name), "%s.info", path);
-    if (!(fh = Open((STRPTR)name, MODE_OLDFILE))) return FALSE;
+    if (!(fh = Open((STRPTR)name, MODE_OLDFILE))) return ICON_NONE;
     if (!fread_all(fh, h, 78) || be16(h) != 0xE310 || be16(h + 2) != 1) goto out;
     if (be32(h + 66) && !fskip(fh, 56)) goto out;                     /* DrawerData */
     if (be32(h + 22) && !skip_image(fh)) goto out;                    /* GadgetRender */
@@ -2763,7 +2769,7 @@ static BOOL read_icon_tooltypes(const char *path, char *buf, ULONG size)
     if (be32(h + 50)) {                                               /* DefaultTool */
         if (!fread_all(fh, w, 4) || !fskip(fh, (LONG)be32(w))) goto out;
     }
-    ok = TRUE;
+    ret = ICON_OK;
     if (!be32(h + 54)) goto out;                                      /* niente tooltype */
     if (!fread_all(fh, w, 4)) goto out;
     count = be32(w) / 4;
@@ -2784,19 +2790,24 @@ static BOOL read_icon_tooltypes(const char *path, char *buf, ULONG size)
     }
 out:
     Close(fh);
-    return ok;
+    if (ret != ICON_OK) buf[0] = 0;
+    return ret;
 }
 
 /* Cerca <device>.info in DEVS:DOSDrivers/ e poi in SYS:Storage/DOSDrivers/.
- * Ritorna il percorso (senza .info) o NULL. */
+ * Ritorna il percorso (senza .info) o NULL. La prima icona trovata vale:
+ * se non e' un'icona classica, icon_format = TRUE e niente tooltype. */
 static const char *find_icon_tooltypes(const char *dev, char *buf, ULONG size)
 {
     static const char *const dirs[] = { "DEVS:DOSDrivers/", "SYS:Storage/DOSDrivers/" };
     static char path[128];
     ULONG i;
     for (i = 0; i < 2; i++) {
+        int r;
         snprintf(path, sizeof(path), "%s%s", dirs[i], dev);
-        if (read_icon_tooltypes(path, buf, size)) return path;
+        r = read_icon_tooltypes(path, buf, size);
+        if (r == ICON_FORMAT) icon_format = TRUE;
+        if (r != ICON_NONE) return path;
     }
     buf[0] = 0;
     return NULL;
@@ -3089,6 +3100,7 @@ void handler_main(const struct HandlerStartup *hs)
              (unsigned long)volnode);
         if (icon_path)
             plog("   icona %s.info: %s", icon_path,
+                 icon_format ? "non e' un'icona classica (PNG?), tooltype non letti" :
                  icon_bad ? "tooltype non validi, ignorati" :
                  icon_args[0] ? icon_args : "nessuna opzione dell'handler");
     }

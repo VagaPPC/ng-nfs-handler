@@ -1,0 +1,16 @@
+; Icona PNG nel cassetto DOSDrivers (os4). Richiede Assign NGNFS:
+; Atteso in NGNFS:build/os4-tp1.log: "icona SYS:Storage/DOSDrivers/TP1.info:
+; non e' un'icona classica (PNG?), tooltype non letti", volume TPNG1.
+; Risultati: NGNFS:build/os4-tp-out.txt e NGNFS:build/os4-tp1.log
+FailAt 21
+Set O NGNFS:build/os4-tp-out.txt
+Delete NGNFS:build/os4-tp1.log QUIET >NIL: *>NIL:
+Echo "== copia" >$O
+Copy NGNFS:test/tooltype/os4/TP1#? SYS:Storage/DOSDrivers/ QUIET >>$O *>>$O
+Mount SYS:Storage/DOSDrivers/TP1 >>$O *>>$O
+Echo "rc=$RC" >>$O
+Wait 3
+Dismount TP1: >>$O *>>$O
+Echo "rc=$RC" >>$O
+Delete SYS:Storage/DOSDrivers/TP1#? QUIET >>$O *>>$O
+Echo "== FINE" >>$O

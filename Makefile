@@ -186,14 +186,18 @@ $(BUILD)/NFSDismount: tools/nfsdismount/nfsdismount.c | $(BUILD)
 # della rete locale (test/*/local/, escluse da git) non devono uscire.
 DIST_TOP  := build/dist
 DIST_DIR  := $(DIST_TOP)/NG-nfs-handler
-OS3_STRIP := $(firstword $(wildcard /opt/amiga/bin/m68k-amigaos-strip) \
-             $(wildcard $(HOME)/toolchains/m68k-amigaos/opt/appveyor/build-agent/opt/amiga/bin/m68k-amigaos-strip))
+# Toolchain dai prefissi gia' usati per compilare (M68K_PREFIX, OS4_SDK),
+# cosi' "make dist M68K_PREFIX=... OS4_SDK=..." vale anche qui.
+OS3_STRIP := $(if $(M68K_PREFIX),$(M68K_PREFIX)/bin/m68k-amigaos-strip,m68k-amigaos-strip)
 OS4_STRIP := $(firstword $(wildcard /opt/ppc-amigaos/bin/ppc-amigaos-strip) \
              $(wildcard $(HOME)/toolchains/bin/ppc-amigaos-strip) ppc-amigaos-strip)
-CLIB4_LICENSE := $(firstword $(wildcard /opt/ppc-amigaos/ppc-amigaos/SDK/clib4/LICENSE) \
-                 $(wildcard $(HOME)/toolchains/ppc-amigaos-rootfs/opt/ppc-amigaos/ppc-amigaos/SDK/clib4/LICENSE))
+DIST_OS4_SDK := $(or $(OS4_SDK),$(firstword $(wildcard /opt/ppc-amigaos/ppc-amigaos/SDK) \
+                $(wildcard $(HOME)/toolchains/ppc-amigaos-rootfs/opt/ppc-amigaos/ppc-amigaos/SDK)))
+CLIB4_LICENSE := $(DIST_OS4_SDK)/clib4/LICENSE
 
 dist:
+	@command -v $(OS3_STRIP) >/dev/null || { echo "m68k-amigaos-strip non trovato: make dist M68K_PREFIX=..."; exit 1; }
+	@test -f $(CLIB4_LICENSE) || { echo "LICENSE di clib4 non trovata: make dist OS4_SDK=..."; exit 1; }
 	$(MAKE) PLATFORM=os3 nfsdismount nfsls handler notifytest
 	$(MAKE) PLATFORM=os4 handler
 	rm -rf $(DIST_TOP) build/NG-nfs-handler.lha
