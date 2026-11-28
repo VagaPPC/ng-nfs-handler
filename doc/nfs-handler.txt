@@ -137,12 +137,6 @@ everything. On AmigaOS 3.x the handler does not read the icon: reading it
 while the handler starts crashed the system, so put the options in the
 Startup string.
 
-Known issue (AmigaOS 4.1): unmounting with Dismount while the mount is
-still in progress (unreachable server, before TIMEOUT expires) can make the
-Workbench crash a few seconds later. The cause is not known yet; it happens
-more often with an icon <device>.info in SYS:Storage/DOSDrivers/.
-Unmounting a volume that is mounted and in use works.
-
 
 5. Server setup (Linux)
 -----------------------

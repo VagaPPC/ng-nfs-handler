@@ -104,10 +104,13 @@ static void bstr_copy(BSTR b, char *out, int max)
     out[n] = 0;
 }
 
-/* Pacchetto di smontaggio da restituire alla fine di plat_start: dopo la
- * risposta Dismount puo' scaricare il segmento, quindi prima deve finire
- * tutto (uscita di clib4 compresa). Vedi plat_reply_die(). */
-static struct DosPacket *die_pkt;
+/* Uscita rimandata alla fine di plat_start (vedi plat_detach()): dopo la
+ * risposta allo smontaggio Dismount puo' scaricare il segmento, quindi
+ * prima deve finire tutto (uscita di clib4 compresa). Fino ad allora la
+ * porta resta viva e il DeviceNode punta a lei. */
+static struct DosPacket   *die_pkt;
+static struct DeviceNode  *fin_dn;
+static struct MsgPort     *fin_port;
 
 static int plat_main(int argc, char **argv)
 {
@@ -211,6 +214,13 @@ out:
      * smontaggio permette di scaricare il nostro codice, e il Forbid()
      * resta fino alla fine del processo. */
     IExec->Forbid();
+    if (fin_port && IDOS) {
+        if (die_pkt && fin_dn) fin_dn->dn_Port = NULL;
+        while ((m = IExec->GetMsg(fin_port)))
+            IDOS->ReplyPkt((struct DosPacket *)m->mn_Node.ln_Name, DOSFALSE,
+                           ERROR_ACTION_NOT_KNOWN);
+        IExec->DeleteMsgPort(fin_port);
+    }
     if (die_pkt && IDOS) IDOS->ReplyPkt(die_pkt, DOSTRUE, 0);
     if (IDOS) IExec->DropInterface((struct Interface *)IDOS);
     if (DOSBase) IExec->CloseLibrary(DOSBase);
@@ -225,9 +235,11 @@ int  mini_init(void) { return 0; }
 void mini_exit(void) { }
 const char *mini_errstr(int e) { return strerror(e); }
 
-void plat_reply_die(struct DosPacket *pkt)
+void plat_detach(struct DeviceNode *dn, struct MsgPort *port, struct DosPacket *die)
 {
-    die_pkt = pkt;
+    fin_dn   = dn;
+    fin_port = port;
+    die_pkt  = die;
 }
 
 void (*mini_assert_hook)(const char *file, int line, const char *expr);

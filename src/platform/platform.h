@@ -81,13 +81,17 @@ void  plat_lock_free(void *lock);
 BOOL plat_collect_ok(void);
 BOOL plat_collect(LONG type, APTR object);
 
-/* Risposta al pacchetto di smontaggio (ACTION_DIE / ACTION_SHUTDOWN), da
- * chiamare sotto Forbid() con dn_Task gia' azzerato. Dopo la risposta chi
- * smonta puo' scaricare il segmento dell'handler: non si deve piu' eseguire
- * codice che possa interrompere il Forbid(). OS3: risponde subito (dopo
- * resta solo la distruzione del pool). OS4: la risposta viene rimandata alla
- * fine di plat_start, dopo l'uscita di clib4 (che chiude file e librerie e
- * puo' fare Wait()). */
-void plat_reply_die(struct DosPacket *pkt);
+/* Uscita dell'handler, sotto Forbid(): staccarsi dal DeviceNode (dn_Task a
+ * NULL, solo se c'e' il pacchetto di smontaggio die; senza, l'handler e'
+ * orfano e il nodo non c'e' piu'), rifiutare i pacchetti rimasti sulla
+ * porta, cancellarla e rispondere a die (ACTION_DIE / ACTION_SHUTDOWN). Dopo
+ * la risposta chi smonta puo' scaricare il segmento: tutto va fatto
+ * insieme, senza niente che interrompa il Forbid(). OS3: subito (dopo resta
+ * solo la distruzione del pool). OS4: alla fine di plat_start, dopo
+ * l'uscita di clib4 (che chiude file e librerie e puo' fare Wait()); fino
+ * ad allora la porta resta valida e il DeviceNode punta ancora a lei, cosi'
+ * il DOS non avvia una seconda istanza e nessuno manda pacchetti a una
+ * porta cancellata. */
+void plat_detach(struct DeviceNode *dn, struct MsgPort *port, struct DosPacket *die);
 
 #endif

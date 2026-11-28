@@ -139,12 +139,6 @@ omettere. Su AmigaOS 3.x l'handler non legge l'icona: leggerla durante
 l'avvio dell'handler mandava in crash il sistema, quindi le opzioni vanno
 nella stringa Startup.
 
-Problema noto (AmigaOS 4.1): smontare con Dismount mentre il mount è ancora
-in corso (server irraggiungibile, prima che scada TIMEOUT) può far andare
-in crash il Workbench qualche secondo dopo. La causa non è ancora nota;
-succede più spesso con l'icona <device>.info in SYS:Storage/DOSDrivers/.
-Smontare un volume montato e in uso funziona.
-
 
 5. Configurazione del server (Linux)
 ------------------------------------

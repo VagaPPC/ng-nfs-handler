@@ -1978,11 +1978,15 @@ static void start_named(struct DosPacket *pkt, BPTR lock, BSTR bname, nfs_cb cb,
 
 static void dispatch(struct DosPacket *pkt);
 
-static void fail_pending(LONG err)
+static LONG fail_pending(LONG err)
 {
     struct Node *nd;
-    while ((nd = RemHead(&pending)))
+    LONG n = 0;
+    while ((nd = RemHead(&pending))) {
         reply((struct DosPacket *)nd->ln_Name, DOSFALSE, err);
+        n++;
+    }
+    return n;
 }
 
 static void cb_mount(int err, struct nfs_context *n, void *data, void *priv)
@@ -3228,7 +3232,26 @@ void handler_main(const struct HandlerStartup *hs)
     if (treq)  DeleteIORequest((struct IORequest *)treq);
     if (tport) DeleteMsgPort(tport);
 
-    fail_pending(ERROR_NO_DISK);
+    /* Richieste ancora in attesa del mount: il device se ne va, quindi
+     * ERROR_DEVICE_NOT_MOUNTED. Poi, se ce n'erano, un secondo di pausa
+     * prima di togliere il volume e rispondere allo smontaggio: su OS4 il
+     * Workbench, se riceve la risposta mentre il device sparisce, si tiene
+     * la porta dell'handler e la usa decine di secondi dopo l'uscita (Grim
+     * Reaper con la porta di un'istanza gia' uscita, shutdown.script). */
+    if (fail_pending(ERROR_DEVICE_NOT_MOUNTED) > 0) {
+        int i;
+        plog("   risposto alle richieste in attesa, pausa di 1 s");
+        for (i = 0; i < 10; i++) {        /* e chi riprova nel frattempo */
+            Delay(5);
+            while ((msg = GetMsg(pktport))) {
+                pkt = (struct DosPacket *)msg->mn_Node.ln_Name;
+                plog("   in pausa: rifiutato %ld da '%s'", (long)pkt->dp_Type,
+                     pkt->dp_Port && pkt->dp_Port->mp_SigTask
+                         ? ((struct Task *)pkt->dp_Port->mp_SigTask)->tc_Node.ln_Name : "?");
+                reply(pkt, DOSFALSE, ERROR_DEVICE_NOT_MOUNTED);
+            }
+        }
+    }
     while (notifies) notify_remove(notifies->nr);
     while (locks) free_lock(locks);
     while (files) free_file(files);
@@ -3240,15 +3263,7 @@ void handler_main(const struct HandlerStartup *hs)
          die_pkt->dp_Type == ACTION_DIE ? "ACTION_DIE" : "ACTION_SHUTDOWN");
 
     Forbid();
-    if (die_pkt) {
-        devnode->dn_Task = NULL;
-        plat_reply_die(die_pkt);
-    }
-    while ((msg = GetMsg(pktport))) {
-        pkt = (struct DosPacket *)msg->mn_Node.ln_Name;
-        ReplyPkt(pkt, DOSFALSE, ERROR_ACTION_NOT_KNOWN);
-    }
-    DeleteMsgPort(pktport);
+    plat_detach(devnode, pktport, die_pkt);
     /* la porta dei notify resta se ci sono messaggi non restituiti (non
      * succede: DIE viene rifiutato finche' ci sono notify attivi) */
     if (notify_port) DeleteMsgPort(notify_port);
